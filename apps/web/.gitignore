@@ -42,3 +42,7 @@ next-env.d.ts
 
 # committed template
 !.env.example
+
+
+# vercel link
+.vercel

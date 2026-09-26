@@ -6,6 +6,8 @@ ShadowCast does impact-based cyclone forecasting for India's coastal districts. 
 
 > Forecasts tell you what the weather will **be**. ShadowCast tells you what it will **do**, then shows you it was right.
 
+**Live:** [shadowcast-two.vercel.app](https://shadowcast-two.vercel.app) · geo API [docs](https://shadowcast-geo-489356738785.asia-south1.run.app/docs)
+
 Built for **Build with AI: Code for Communities, Second Edition**, Track 5 *(Track-Based Cyclone Impact & Infrastructure Vulnerability Forecaster)*.
 
 ## The loop: Predict → Prioritise → Prepare → Prove
@@ -26,13 +28,15 @@ Built for **Build with AI: Code for Communities, Second Edition**, Track 5 *(Tra
 | [`apps/web`](apps/web) | Operations console: Google Maps + deck.gl, timeline replay, ensemble spaghetti, ranked assets with reasons, the Gemini duty analyst, backtest; Next.js 16 on Vercel |
 | [`services/geo`](services/geo) | Hazard per asset, calibrated outage probability, ranking with reasons, satellite backtests; FastAPI on Cloud Run |
 | [`services/archiver`](services/archiver) | Cloud Run Job that snapshots GDACS, NDMA SACHET, IBTrACS and WeatherNext 2 every 6 h for as-issued replays |
-| [`infra`](infra) | Idempotent `gcloud` deployment scripts (geo API, archiver, agent resources) |
+| [`infra`](infra) | Idempotent `gcloud` deployment scripts (geo API, archiver, agent resources, Vercel federation) |
 
 **As-issued forecast replay:** ShadowCast replays ECMWF's 52-member ensemble as it was issued, 68 to 20 hours before landfall. Every member drives the same wind model, so each asset gets the probability of gales and hurricane-force wind, and when gales arrive. For Cyclone Dana (2024) at 44 h lead, 94-96 % of members put gales on Paradip's hospitals and Mahakalapada's shelters about 15 h before landfall.
 
 **The Gemini duty analyst:** an agent on Gemini 3.8 Flash (Vertex AI) answers questions such as *"why is this hospital ranked #3?"* by calling the geo API, so every number it quotes comes from ShadowCast's deterministic model, never from Gemini itself. It drafts advisories: officer actions per asset plus a public CAP 1.2 message in English, Hindi and Odia, validated against a schema. The officer approves or rejects each draft (approvals are HMAC-signed so they cannot be forged), and every decision is written once to an append-only Firestore audit log. Approved advisories can be downloaded as CAP XML and heard in each language through Gemini-TTS; classic Cloud Text-to-Speech has no Odia voice.
 
-Coming next: Vercel deployment and the Amphan (2020) out-of-sample backtest.
+**Deployment:** the console runs on Vercel and reaches Vertex AI and Firestore through Workload Identity Federation: Vercel's OIDC token is exchanged for short-lived credentials of a service account that may only call Gemini and use Firestore. There is no service-account key anywhere. The Python services run on Cloud Run.
+
+Coming next: the Amphan (2020) out-of-sample backtest.
 
 ## Stack
 
