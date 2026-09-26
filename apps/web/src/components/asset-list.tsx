@@ -36,56 +36,51 @@ export function AssetList({ assets, colorBy, selectedId, onSelect }: AssetListPr
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap gap-1.5 px-4 pb-3" aria-label="Filter by asset kind">
+      <div className="flex flex-wrap gap-1 px-3 pb-3" aria-label="Filter by asset kind">
         {counts.map(([kind, count]) => (
           <button
             key={kind}
             type="button"
             aria-pressed={kinds.includes(kind)}
             onClick={() => toggle(kind)}
-            className={clsx(
-              "rounded-full border px-2.5 py-0.5 text-xs",
-              kinds.includes(kind)
-                ? "border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--text-primary)]"
-                : "border-white/10 text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
-            )}
+            className="segment border border-[var(--line)] !px-2.5 !tracking-[0.08em]"
           >
-            {kindLabel(kind)} <span className="tabular-nums text-[var(--text-muted)]">{count}</span>
+            {kindLabel(kind)} <span className="opacity-60">{count}</span>
           </button>
         ))}
       </div>
-      <ol className="min-h-0 flex-1 overflow-y-auto border-t border-white/10">
+      <ol className="min-h-0 flex-1 overflow-y-auto border-t border-[var(--line)] px-2 py-1">
         {filtered.slice(0, visible).map((asset) => {
           const value = assetValue(asset, colorBy, null);
           const forecast = "p34" in asset;
+          const shown = colorBy === "gales" && forecast ? (asset as ForecastAsset).p34 : asset.p_outage;
           return (
             <li key={asset.asset_id}>
               <button
                 type="button"
                 onClick={() => onSelect(asset.asset_id)}
                 className={clsx(
-                  "grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 border-b border-white/5 px-4 py-2.5 text-left hover:bg-white/5",
-                  asset.asset_id === selectedId && "bg-white/10",
+                  "grid w-full grid-cols-[2.25rem_1fr_4.5rem] items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-[var(--surface-3)]",
+                  asset.asset_id === selectedId && "bg-[var(--surface-3)]",
                 )}
               >
-                <span className="font-mono text-xs tabular-nums text-[var(--text-muted)]">#{asset.rank}</span>
+                <span className="readout text-xs text-[var(--text-muted)]">{String(asset.rank).padStart(2, "0")}</span>
                 <span className="min-w-0">
                   <span className="block truncate text-sm text-[var(--text-primary)]">
                     {asset.name ?? `Unnamed ${kindLabel(asset.kind).toLowerCase()}`}
                   </span>
-                  <span className="block text-xs text-[var(--text-secondary)]">
+                  <span className="label mt-0.5 block !tracking-[0.1em]">
                     {kindLabel(asset.kind)}
                     {forecast ? ` · gales ${percent((asset as ForecastAsset).p34)}` : ""}
                   </span>
                 </span>
-                <span className="flex items-center gap-2">
-                  <span
-                    className="size-2.5 rounded-full"
-                    style={{ background: rgbCss(riskColor(value)) }}
-                    aria-hidden
-                  />
-                  <span className="w-12 text-right font-mono text-sm tabular-nums text-[var(--text-primary)]">
-                    {percent(colorBy === "gales" && forecast ? (asset as ForecastAsset).p34 : asset.p_outage)}
+                <span className="text-right">
+                  <span className="readout block text-sm text-[var(--text-primary)]">{percent(shown)}</span>
+                  <span className="mt-1.5 block h-[3px] rounded-full bg-[var(--surface-3)]" aria-hidden>
+                    <span
+                      className="block h-full rounded-full"
+                      style={{ width: `${Math.max(4, value * 100)}%`, background: rgbCss(riskColor(value)) }}
+                    />
                   </span>
                 </span>
               </button>
@@ -94,11 +89,7 @@ export function AssetList({ assets, colorBy, selectedId, onSelect }: AssetListPr
         })}
         {visible < filtered.length && (
           <li className="p-3 text-center">
-            <button
-              type="button"
-              onClick={() => setVisible((v) => v + PAGE)}
-              className="text-sm text-[var(--accent)] hover:underline"
-            >
+            <button type="button" onClick={() => setVisible((v) => v + PAGE)} className="btn-ghost px-4 py-1.5 text-xs">
               Show {Math.min(PAGE, filtered.length - visible)} more of {filtered.length - visible}
             </button>
           </li>

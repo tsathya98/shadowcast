@@ -52,7 +52,8 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-3" aria-live="polite">
         {messages.length === 0 && (
           <div className="space-y-3 pt-1">
-            <p className="text-sm text-[var(--text-secondary)]">
+            <div className="label">Duty analyst · Gemini 3.8 Flash</div>
+            <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
               Ask why an asset is at risk, or have Gemini draft an advisory with officer actions and a public message in
               English, Hindi and the local language. Nothing is issued until you approve it.
             </p>
@@ -62,7 +63,7 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
                   key={suggestion}
                   type="button"
                   onClick={() => send(suggestion)}
-                  className="rounded-lg border border-white/10 px-3 py-1.5 text-left text-sm text-[var(--text-primary)] hover:bg-white/5"
+                  className="rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-3.5 py-2.5 text-left text-sm text-[var(--text-primary)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--surface-3)]"
                 >
                   {suggestion}
                 </button>
@@ -76,7 +77,7 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
             key={message.id}
             className={clsx(
               "flex flex-col gap-2 text-sm",
-              message.role === "user" && "ml-8 self-end rounded-xl bg-white/10 px-3 py-2",
+              message.role === "user" && "ml-10 self-end rounded-2xl rounded-br-md bg-[var(--surface-3)] px-3.5 py-2.5",
             )}
           >
             {message.parts.map((part, index) => {
@@ -150,7 +151,7 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
         <div ref={end} />
       </div>
 
-      <form onSubmit={submit} className="flex items-end gap-2 border-t border-white/10 p-3">
+      <form onSubmit={submit} className="flex items-end gap-2 border-t border-[var(--line)] p-3">
         <textarea
           value={input}
           onChange={(event) => setInput(event.target.value)}
@@ -161,14 +162,14 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
           maxLength={2000}
           placeholder="Ask the duty analyst…"
           aria-label="Message the duty analyst"
-          className="min-h-0 flex-1 resize-none rounded-lg border border-white/15 bg-[var(--surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
+          className="min-h-0 flex-1 resize-none rounded-2xl border border-[var(--line-strong)] bg-[var(--surface-2)] px-3.5 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
         />
         {busy ? (
           <button
             type="button"
             onClick={() => void stop()}
             aria-label="Stop"
-            className="grid size-9 place-items-center rounded-full bg-white/10 hover:bg-white/20"
+            className="btn-ghost grid size-10 place-items-center"
           >
             <Square className="size-3.5" />
           </button>
@@ -177,7 +178,7 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
             type="submit"
             disabled={!input.trim()}
             aria-label="Send"
-            className="grid size-9 place-items-center rounded-full bg-[var(--accent)] text-white disabled:opacity-40"
+            className="btn-primary grid size-10 place-items-center disabled:opacity-40"
           >
             <ArrowUp className="size-4" />
           </button>

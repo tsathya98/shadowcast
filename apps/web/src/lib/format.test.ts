@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assetValue,
   compactNumber,
+  istStamp,
   kindLabel,
   knots,
   leadLabel,
@@ -82,5 +83,16 @@ describe("assetValue", () => {
     ["wind", asset, null, 0],
   ] as const)("colorBy=%s", (colorBy, item, wind, expected) => {
     expect(assetValue(item, colorBy, wind)).toBe(expected);
+  });
+});
+
+describe("istStamp", () => {
+  it.each([
+    ["2019-05-03T03:15:00Z", "3 May 08:45 IST"],
+    ["2024-10-24T20:00:00Z", "25 Oct 01:30 IST"],
+    [null, "–"],
+    ["not a time", "–"],
+  ])("istStamp(%s)", (iso, expected) => {
+    expect(istStamp(iso)).toBe(expected);
   });
 });

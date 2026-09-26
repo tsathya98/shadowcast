@@ -17,19 +17,19 @@ import { percent } from "@/lib/format";
 import type { ScenarioDetail } from "@/lib/types";
 
 const TOOLTIP_STYLE = {
-  background: "var(--surface-2)",
-  border: "1px solid rgb(255 255 255 / 0.1)",
-  borderRadius: 8,
+  background: "var(--surface-1)",
+  border: "1px solid var(--line-strong)",
+  borderRadius: 10,
   fontSize: 12,
 };
-const AXIS_TICK = { fontSize: 10, fill: "var(--text-muted)" };
+const AXIS_TICK = { fontSize: 11, fill: "var(--text-muted)", fontFamily: "var(--font-geist-mono)" };
 
 function Tile({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
-    <div className="rounded-lg bg-white/5 px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{label}</div>
-      <div className="font-mono text-xl tabular-nums text-[var(--text-primary)]">{value}</div>
-      <div className="text-[11px] text-[var(--text-secondary)]">{hint}</div>
+    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-3.5 py-3">
+      <div className="label">{label}</div>
+      <div className="readout mt-1 text-2xl text-[var(--text-primary)]">{value}</div>
+      <div className="mt-0.5 text-xs text-[var(--text-secondary)]">{hint}</div>
     </div>
   );
 }
@@ -50,7 +50,10 @@ export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
-      <p className="text-sm text-[var(--text-secondary)]">
+      <span className="label self-start rounded-full border border-[var(--line-strong)] px-2.5 py-1 !text-[var(--text-primary)]">
+        {skill.out_of_sample ? "Held-out storm" : "Reference storm"}
+      </span>
+      <p className="-mt-1 text-sm text-[var(--text-secondary)]">
         {skill.out_of_sample
           ? `Held-out storm: the outage model was fitted on ${scenario.model.trained_on} and is scored here without refitting.`
           : "Reference storm: the outage model is fitted here, then tested on other storms."}{" "}
@@ -68,7 +71,7 @@ export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
       </div>
 
       {holdout && (
-        <p className="rounded-lg bg-white/5 px-3 py-2 text-xs text-[var(--text-secondary)]">
+        <p className="rounded-2xl border border-[var(--line)] px-3.5 py-3 text-xs leading-relaxed text-[var(--text-secondary)]">
           <span className="font-medium text-[var(--text-primary)]">Spatial holdout.</span> Refitted {holdout.folds}{" "}
           times, each time hiding one stretch of coast from south to north: out-of-fold AUC{" "}
           <span className="font-mono text-[var(--text-primary)]">{holdout.auc?.toFixed(2) ?? "–"}</span>, Brier{" "}
@@ -79,13 +82,11 @@ export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
       )}
 
       <section aria-label="Median night-light loss by modelled wind band">
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-          Median light loss by modelled wind
-        </h3>
+        <h3 className="label mb-2">Median light loss by modelled wind</h3>
         <div className="h-44">
           <ResponsiveContainer>
             <BarChart data={bands} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
-              <CartesianGrid stroke="rgb(255 255 255 / 0.06)" vertical={false} />
+              <CartesianGrid stroke="var(--line)" vertical={false} />
               <XAxis dataKey="band" unit=" kt" tick={AXIS_TICK} stroke="transparent" />
               <YAxis unit="%" domain={[0, 100]} tick={AXIS_TICK} stroke="transparent" width={52} />
               <Tooltip
@@ -98,7 +99,7 @@ export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
               />
               <Bar
                 dataKey="median"
-                fill="var(--series-1)"
+                fill="var(--accent)"
                 radius={[4, 4, 0, 0]}
                 maxBarSize={36}
                 isAnimationActive={false}
@@ -109,13 +110,11 @@ export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
       </section>
 
       <section aria-label="Predicted outage probability against observed light loss per substation">
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-          Predicted vs observed, per substation
-        </h3>
+        <h3 className="label mb-2">Predicted vs observed, per substation</h3>
         <div className="h-52">
           <ResponsiveContainer>
             <ScatterChart margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
-              <CartesianGrid stroke="rgb(255 255 255 / 0.06)" />
+              <CartesianGrid stroke="var(--line)" />
               <XAxis
                 dataKey="p"
                 type="number"
@@ -145,7 +144,7 @@ export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
               />
               <Scatter
                 data={lit.map((s) => ({ p: s.p_outage, loss: Math.max(-50, s.loss_pct ?? 0), name: s.name }))}
-                fill="var(--series-1)"
+                fill="var(--accent)"
                 fillOpacity={0.75}
                 isAnimationActive={false}
               />

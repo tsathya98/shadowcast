@@ -13,31 +13,45 @@ import { ReplayStrip } from "@/components/replay-strip";
 import { Timeline } from "@/components/timeline";
 import { useAssets, useForecastTracks, useHazard, useScenario, useTrack } from "@/lib/api";
 import { LANGUAGES, REGION_LANGUAGE } from "@/lib/advisory";
-import { type ColorBy, kindLabel, rgbCss, riskColor } from "@/lib/format";
+import { type ColorBy, compactNumber, kindLabel, rgbCss, riskColor } from "@/lib/format";
 import type { ReplayMode, ScenarioSummary } from "@/lib/types";
 
 // deck.gl and the Maps JS API need the browser: never render the map on the server.
 const MapView = dynamic(() => import("@/components/map-view").then((m) => m.MapView), {
   ssr: false,
-  loading: () => <div className="absolute inset-0 animate-pulse bg-white/5" />,
+  loading: () => <div className="absolute inset-0 animate-pulse bg-white/[0.03]" />,
 });
 
 const QUANTUM_MS = 15 * 60 * 1000;
 const LEGENDS: Record<ColorBy, string> = {
   risk: "Grid-outage probability",
-  gales: "Ensemble members bringing gales (34 kt)",
-  wind: "Modelled wind now (0–120 kt)",
+  gales: "Members bringing gales (34 kt)",
+  wind: "Modelled wind now",
 };
+const COLOR_LABELS: Record<ColorBy, string> = { risk: "Outage", gales: "Gales", wind: "Wind now" };
+const TABS = ["prioritise", "prepare", "prove"] as const;
 
 interface ConsoleProps {
   scenarios: ScenarioSummary[];
   mapsApiKey: string;
 }
 
+function Readout({ label, value, unit }: { label: string; value: string; unit?: string }) {
+  return (
+    <div className="glass min-w-28 rounded-2xl px-4 py-2.5">
+      <div className="label">{label}</div>
+      <div className="readout mt-0.5 text-2xl font-medium text-[var(--text-primary)]">
+        {value}
+        {unit && <span className="ml-1 text-sm text-[var(--text-muted)]">{unit}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   const [scenarioId, setScenarioId] = useState(scenarios[0].id);
   const [mode, setMode] = useState<ReplayMode>({ kind: "best-track" });
-  const [tab, setTab] = useState<"prioritise" | "prepare" | "prove">("prioritise");
+  const [tab, setTab] = useState<(typeof TABS)[number]>("prioritise");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [colorBy, setColorBy] = useState<ColorBy>("risk");
   const [scrub, setScrub] = useState<{ scenarioId: string; ms: number } | null>(null);
@@ -70,6 +84,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
 
   const assets = useMemo(() => page?.items ?? [], [page]);
   const selected = assets.find((a) => a.asset_id === selectedId) ?? null;
+  const atRisk = useMemo(() => assets.filter((a) => a.p_outage >= 0.5).length, [assets]);
 
   const changeScenario = (id: string) => {
     setScenarioId(id);
@@ -103,6 +118,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
 
   const colorOptions: ColorBy[] = mode.kind === "forecast" ? ["gales", "risk"] : ["risk", "wind"];
   const forecastKey = mode.kind === "forecast" ? mode.key : null;
+  const forecast = scenario?.forecasts.find((f) => f.key === forecastKey);
   const local = scenario && REGION_LANGUAGE[scenario.region.id];
   const suggestions = [
     selected
@@ -115,21 +131,45 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   ];
 
   return (
-    <div className="grid h-dvh grid-rows-[auto_1fr_auto] bg-[var(--surface-0)] text-[var(--text-primary)]">
-      <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-white/10 bg-[var(--surface-1)] px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Image src="/logo.svg" alt="" width={28} height={28} priority />
-          <span className="text-lg font-semibold tracking-tight">ShadowCast</span>
-          <span className="hidden text-xs text-[var(--text-muted)] md:inline">
-            see the storm&apos;s shadow before it falls
-          </span>
-        </div>
-        <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-          Storm
+    <div className="relative flex min-h-dvh flex-col bg-[var(--surface-0)] text-[var(--text-primary)] lg:block lg:h-dvh lg:overflow-hidden">
+      <section
+        className="relative h-[48dvh] shrink-0 lg:absolute lg:inset-0 lg:h-auto"
+        aria-label="Map of assets and storm"
+      >
+        {scenario && (
+          <MapView
+            apiKey={mapsApiKey}
+            region={scenario.region}
+            assets={assets}
+            colorBy={colorBy}
+            windById={windById}
+            track={track}
+            members={members}
+            storm={mode.kind === "best-track" ? (hazard?.storm ?? null) : null}
+            selectedId={selectedId}
+            onSelect={select}
+          />
+        )}
+        {/* Dissolve the map's edges into the void so the floating panels read cleanly. */}
+        <div
+          className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,rgb(14_16_18/0.9),transparent_24%,transparent_76%,rgb(14_16_18/0.92))]"
+          aria-hidden
+        />
+      </section>
+
+      {/* Mission header: brand, storm, replay, live readouts. */}
+      <header className="relative flex flex-col items-start gap-3 p-4 lg:pointer-events-none lg:absolute lg:top-0 lg:right-[432px] lg:left-0">
+        <div className="glass flex max-w-full items-center gap-3 rounded-full py-1.5 pr-2 pl-2.5 lg:pointer-events-auto">
+          <Image src="/logo.svg" alt="" width={30} height={30} priority />
+          <div className="shrink-0 leading-none">
+            <div className="text-[15px] font-semibold tracking-tight">ShadowCast</div>
+            <div className="label mt-1 hidden sm:block">impact forecast · proven by satellite</div>
+          </div>
           <select
             value={scenarioId}
             onChange={(event) => changeScenario(event.target.value)}
-            className="rounded-md border border-white/15 bg-[var(--surface-2)] px-2 py-1 text-[var(--text-primary)]"
+            aria-label="Storm"
+            className="min-w-0 flex-1 cursor-pointer truncate rounded-full border border-[var(--line-strong)] bg-[var(--surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] hover:bg-[var(--surface-3)]"
           >
             {scenarios.map((s) => (
               <option key={s.id} value={s.id}>
@@ -137,134 +177,131 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
               </option>
             ))}
           </select>
-        </label>
-        <div className="min-w-0 flex-1">
+        </div>
+
+        <div className="lg:pointer-events-auto">
           <ReplayStrip forecasts={scenario?.forecasts ?? []} mode={mode} onChange={changeMode} />
         </div>
-      </header>
 
-      <main className="grid min-h-0 grid-cols-1 lg:grid-cols-[1fr_26rem]">
-        <section className="relative min-h-[50vh]" aria-label="Map of assets and storm">
-          {scenario && (
-            <MapView
-              apiKey={mapsApiKey}
-              region={scenario.region}
-              assets={assets}
-              colorBy={colorBy}
-              windById={windById}
-              track={track}
-              members={members}
-              storm={mode.kind === "best-track" ? (hazard?.storm ?? null) : null}
-              selectedId={selectedId}
-              onSelect={select}
-            />
-          )}
-          <div className="pointer-events-auto absolute bottom-4 left-4 w-72 rounded-xl border border-white/10 bg-[var(--surface-1)]/90 p-3 backdrop-blur">
-            <div className="mb-2 flex gap-1" role="radiogroup" aria-label="Colour assets by">
-              {colorOptions.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  role="radio"
-                  aria-checked={colorBy === option}
-                  onClick={() => setColorBy(option)}
-                  className={clsx(
-                    "rounded-md px-2 py-0.5 text-xs",
-                    colorBy === option
-                      ? "bg-white/15 text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
-                  )}
-                >
-                  {option === "risk" ? "Outage risk" : option === "gales" ? "Gale chance" : "Wind now"}
-                </button>
-              ))}
-            </div>
-            <div className="text-xs text-[var(--text-secondary)]">{LEGENDS[colorBy]}</div>
-            <div
-              className="mt-1.5 h-2 rounded-full"
-              style={{
-                background: `linear-gradient(90deg, ${[0, 0.25, 0.5, 0.75, 1].map((t) => rgbCss(riskColor(t))).join(", ")})`,
-              }}
-              aria-hidden
-            />
-            <div className="mt-1 flex justify-between font-mono text-[10px] text-[var(--text-muted)]">
-              <span>{colorBy === "wind" ? "0 kt" : "0%"}</span>
-              <span>{colorBy === "wind" ? "120 kt" : "100%"}</span>
-            </div>
-            {mode.kind === "forecast" && (
-              <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
-                <span className="h-0.5 w-5 bg-[var(--series-1)]" aria-hidden /> ECMWF ensemble members
-              </div>
-            )}
-          </div>
-        </section>
-
-        <aside className="flex min-h-0 flex-col border-l border-white/10 bg-[var(--surface-1)]">
-          <div className="flex gap-4 px-4 pt-3" role="tablist">
-            {(["prioritise", "prepare", "prove"] as const).map((name) => (
-              <button
-                key={name}
-                type="button"
-                role="tab"
-                aria-selected={tab === name}
-                onClick={() => setTab(name)}
-                className={clsx(
-                  "border-b-2 pb-2 text-sm font-medium capitalize",
-                  tab === name
-                    ? "border-[var(--accent)] text-[var(--text-primary)]"
-                    : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
-                )}
-              >
-                {name}
-              </button>
-            ))}
-          </div>
-          {/* Kept mounted while hidden so the conversation survives tab switches; a new replay starts a new one. */}
-          <div className={clsx("min-h-0 flex-1 flex-col pt-3", tab === "prepare" ? "flex" : "hidden")}>
-            <PreparePanel
-              key={`${scenarioId}:${forecastKey ?? "best-track"}`}
-              context={{ scenarioId, forecastKey, selectedAssetId: selectedId }}
-              suggestions={suggestions}
-              onSelectAsset={openAsset}
-            />
-          </div>
-          <div className={clsx("min-h-0 flex-1 flex-col pt-3", tab === "prepare" ? "hidden" : "flex")}>
-            {tab === "prove" && scenario ? (
-              <BacktestPanel scenario={scenario} />
-            ) : selected ? (
-              <AssetDetail scenarioId={scenarioId} asset={selected} onBack={() => setSelectedId(null)} />
-            ) : assetsLoading && !page ? (
-              <div className="space-y-2 px-4">
-                {Array.from({ length: 8 }, (_, i) => (
-                  <div key={i} className="h-11 animate-pulse rounded bg-white/5" />
-                ))}
-              </div>
+        {scenario && (
+          <div className="flex flex-wrap gap-2 lg:pointer-events-auto">
+            {forecast ? (
+              <>
+                <Readout label="Members" value={String(forecast.members)} />
+                <Readout label="Likely gales" value={compactNumber(forecast.assets_likely_gale)} unit="assets" />
+              </>
             ) : (
               <>
-                <p className="px-4 pb-2 text-xs text-[var(--text-secondary)]">
-                  {page?.total ?? 0} assets ranked by{" "}
-                  {mode.kind === "forecast"
-                    ? "outage risk, then gale chance × criticality"
-                    : "grid-outage probability × criticality"}
-                </p>
-                <AssetList assets={assets} colorBy={colorBy} selectedId={selectedId} onSelect={select} />
+                <Readout
+                  label="Storm now"
+                  value={hazard?.storm ? String(Math.round(hazard.storm.vmax_kt)) : "—"}
+                  unit="kt"
+                />
+                <Readout label="Backtest AUC" value={scenario.skill.auc?.toFixed(2) ?? "—"} />
               </>
             )}
+            <Readout label="≥50% outage" value={compactNumber(atRisk)} unit="assets" />
           </div>
-        </aside>
-      </main>
+        )}
+      </header>
+
+      {/* Legend and encoding switch. */}
+      <div className="glass relative mx-4 mb-3 rounded-2xl p-3 lg:absolute lg:bottom-[116px] lg:left-4 lg:m-0 lg:w-72">
+        <div className="mb-2.5 flex gap-1" role="radiogroup" aria-label="Colour assets by">
+          {colorOptions.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={colorBy === option}
+              onClick={() => setColorBy(option)}
+              className="segment"
+            >
+              {COLOR_LABELS[option]}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-[var(--text-secondary)]">{LEGENDS[colorBy]}</div>
+        <div
+          className="mt-2 h-1.5 rounded-full"
+          style={{
+            background: `linear-gradient(90deg, ${[0, 0.25, 0.5, 0.75, 1].map((t) => rgbCss(riskColor(t))).join(", ")})`,
+          }}
+          aria-hidden
+        />
+        <div className="label mt-1.5 flex justify-between">
+          <span>{colorBy === "wind" ? "0 kt" : "0%"}</span>
+          <span>{colorBy === "wind" ? "120 kt" : "100%"}</span>
+        </div>
+        {mode.kind === "forecast" && (
+          <div className="mt-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+            <span className="h-0.5 w-5 bg-[var(--member)]" aria-hidden /> ECMWF ensemble members
+          </div>
+        )}
+      </div>
 
       {scenario && span && timeMs != null && (
-        <Timeline
-          start={span.start}
-          end={span.end}
-          value={timeMs}
-          landfall={scenario.landfall}
-          playing={playing}
-          onChange={setTimeMs}
-          onPlayingChange={setPlaying}
-        />
+        <div className="relative mx-4 mb-3 lg:absolute lg:right-[432px] lg:bottom-4 lg:left-4 lg:m-0">
+          <Timeline
+            start={span.start}
+            end={span.end}
+            value={timeMs}
+            landfall={scenario.landfall}
+            playing={playing}
+            onChange={setTimeMs}
+            onPlayingChange={setPlaying}
+          />
+        </div>
       )}
+
+      <aside className="glass relative mx-4 mb-4 flex h-[75dvh] min-h-0 flex-col rounded-3xl lg:absolute lg:top-4 lg:right-4 lg:bottom-4 lg:m-0 lg:h-auto lg:w-[400px]">
+        <div className="flex gap-1 p-2" role="tablist" aria-label="Panels">
+          {TABS.map((name) => (
+            <button
+              key={name}
+              type="button"
+              role="tab"
+              aria-selected={tab === name}
+              onClick={() => setTab(name)}
+              className="segment flex-1 !py-2"
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+        {/* Kept mounted while hidden so the conversation survives tab switches; a new replay starts a new one. */}
+        <div className={clsx("min-h-0 flex-1 flex-col pt-2", tab === "prepare" ? "flex" : "hidden")}>
+          <PreparePanel
+            key={`${scenarioId}:${forecastKey ?? "best-track"}`}
+            context={{ scenarioId, forecastKey, selectedAssetId: selectedId }}
+            suggestions={suggestions}
+            onSelectAsset={openAsset}
+          />
+        </div>
+        <div className={clsx("min-h-0 flex-1 flex-col pt-2", tab === "prepare" ? "hidden" : "flex")}>
+          {tab === "prove" && scenario ? (
+            <BacktestPanel scenario={scenario} />
+          ) : selected ? (
+            <AssetDetail scenarioId={scenarioId} asset={selected} onBack={() => setSelectedId(null)} />
+          ) : assetsLoading && !page ? (
+            <div className="space-y-2 px-4">
+              {Array.from({ length: 8 }, (_, i) => (
+                <div key={i} className="h-12 animate-pulse rounded-xl bg-white/[0.04]" />
+              ))}
+            </div>
+          ) : (
+            <>
+              <p className="label px-4 pb-2">
+                {compactNumber(page?.total ?? 0)} assets ·{" "}
+                {mode.kind === "forecast"
+                  ? "outage, then gale chance × criticality"
+                  : "outage probability × criticality"}
+              </p>
+              <AssetList assets={assets} colorBy={colorBy} selectedId={selectedId} onSelect={select} />
+            </>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }

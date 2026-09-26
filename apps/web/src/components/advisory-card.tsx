@@ -1,6 +1,5 @@
 "use client";
 
-import { clsx } from "clsx";
 import { Check, Download, X } from "lucide-react";
 import { useState } from "react";
 
@@ -31,15 +30,13 @@ export function AdvisoryCard({ advisory, decision, onSelectAsset }: AdvisoryCard
   const info = advisory.infos.find((i) => i.language === language) ?? advisory.infos[0];
 
   return (
-    <article className="rounded-xl border border-white/10 bg-[var(--surface-2)] p-3 text-sm">
+    <article className="rounded-2xl border border-[var(--line-strong)] bg-[var(--surface-2)] p-4 text-sm">
       <header className="flex items-start justify-between gap-2">
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
-            Draft advisory · CAP 1.2 exercise
-          </div>
-          <h3 className="font-medium text-[var(--text-primary)]">{advisory.event}</h3>
+          <div className="label">Draft advisory · CAP 1.2 exercise</div>
+          <h3 className="mt-1 text-base font-semibold tracking-tight text-[var(--text-primary)]">{advisory.event}</h3>
         </div>
-        <span className="shrink-0 rounded-md bg-white/10 px-2 py-0.5 text-xs text-[var(--text-primary)]">
+        <span className="label shrink-0 rounded-full border border-[var(--accent)] px-2.5 py-1 !text-[var(--accent)]">
           {advisory.responseType}
         </span>
       </header>
@@ -52,14 +49,14 @@ export function AdvisoryCard({ advisory, decision, onSelectAsset }: AdvisoryCard
 
       {advisory.actions.length > 0 && (
         <section className="mt-3">
-          <h4 className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Officer actions</h4>
-          <ol className="mt-1 space-y-1">
+          <h4 className="label">Officer actions</h4>
+          <ol className="mt-1.5 space-y-1.5">
             {advisory.actions.map((action, i) => (
               <li key={`${action.assetId}-${i}`} className="text-[var(--text-secondary)]">
                 <button
                   type="button"
                   onClick={() => onSelectAsset(action.assetId)}
-                  className="font-medium text-[var(--text-primary)] underline decoration-white/20 underline-offset-2 hover:decoration-white/60"
+                  className="font-medium text-[var(--text-primary)] underline decoration-[var(--line-strong)] underline-offset-2 hover:decoration-[var(--accent)]"
                 >
                   {action.assetName}
                 </button>
@@ -79,12 +76,7 @@ export function AdvisoryCard({ advisory, decision, onSelectAsset }: AdvisoryCard
               role="tab"
               aria-selected={i.language === info.language}
               onClick={() => setLanguage(i.language)}
-              className={clsx(
-                "rounded-md px-2 py-0.5 text-xs",
-                i.language === info.language
-                  ? "bg-white/15 text-[var(--text-primary)]"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
-              )}
+              className="segment !font-sans !text-xs !tracking-normal !normal-case"
             >
               {LANGUAGES[i.language].label}
             </button>
@@ -107,20 +99,20 @@ export function AdvisoryCard({ advisory, decision, onSelectAsset }: AdvisoryCard
         )}
       </section>
 
-      <footer className="mt-3 border-t border-white/10 pt-3">
+      <footer className="mt-4 border-t border-[var(--line)] pt-3">
         {decision.state === "pending" && (
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => decision.onDecide(true)}
-              className="flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110"
+              className="btn-primary flex items-center gap-1.5 px-4 py-2 text-sm"
             >
               <Check className="size-4" /> Approve and issue
             </button>
             <button
               type="button"
               onClick={() => decision.onDecide(false)}
-              className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-sm text-[var(--text-primary)] hover:bg-white/20"
+              className="btn-ghost flex items-center gap-1.5 px-4 py-2 text-sm"
             >
               <X className="size-4" /> Reject
             </button>

@@ -3,7 +3,7 @@
 import { Pause, Play } from "lucide-react";
 import { useEffect } from "react";
 
-import { leadLabel, utcAndIst } from "@/lib/format";
+import { istStamp, leadLabel, utcAndIst } from "@/lib/format";
 
 interface TimelineProps {
   start: number;
@@ -17,6 +17,7 @@ interface TimelineProps {
 
 const STEP_MS = 15 * 60 * 1000; // matches the hazard model's densified track
 const TICK_MS = 120; // playback advances one 15-minute step per tick
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function Timeline({ start, end, value, landfall, playing, onChange, onPlayingChange }: TimelineProps) {
   useEffect(() => {
@@ -30,41 +31,69 @@ export function Timeline({ start, end, value, landfall, playing, onChange, onPla
   }, [playing, value, end, onChange, onPlayingChange]);
 
   const iso = new Date(value).toISOString();
-  const landfallPct = ((Date.parse(landfall) - start) / (end - start)) * 100;
+  const pct = (ms: number) => ((ms - start) / (end - start)) * 100;
+  const landfallPct = pct(Date.parse(landfall));
+  const days = Array.from(
+    { length: Math.floor((end - start) / DAY_MS) + 1 },
+    (_, i) => Math.ceil(start / DAY_MS) * DAY_MS + i * DAY_MS,
+  ).filter((ms) => ms <= end && Math.abs(pct(ms) - pct(Date.parse(landfall))) > 6); // keep clear of the landfall label
+  const utc = utcAndIst(iso).split(" · ")[0];
 
   return (
-    <div className="flex items-center gap-4 border-t border-white/10 bg-[var(--surface-1)] px-4 py-3">
+    <div className="glass flex items-center gap-4 rounded-3xl py-3 pr-5 pl-3">
       <button
         type="button"
         onClick={() => onPlayingChange(!playing)}
-        className="grid size-9 shrink-0 place-items-center rounded-full bg-white/10 text-[var(--text-primary)] hover:bg-white/20"
+        className="btn-primary grid size-11 shrink-0 place-items-center"
         aria-label={playing ? "Pause replay" : "Play replay"}
       >
-        {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
+        {playing ? <Pause className="size-4" /> : <Play className="ml-0.5 size-4" />}
       </button>
-      <div className="relative flex-1">
-        <input
-          type="range"
-          min={start}
-          max={end}
-          step={STEP_MS}
-          value={value}
-          onChange={(event) => onChange(Number(event.target.value))}
-          className="w-full accent-[var(--accent)]"
-          aria-label="Replay time"
-        />
-        {landfallPct >= 0 && landfallPct <= 100 && (
-          <span
-            className="pointer-events-none absolute -top-3 -translate-x-1/2 text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)]"
-            style={{ left: `${landfallPct}%` }}
-          >
-            landfall
-          </span>
-        )}
+      <div className="min-w-0 flex-1">
+        <div className="relative hidden h-5 sm:block">
+          {days.map((ms) => (
+            <span
+              key={ms}
+              className="label absolute top-0 -translate-x-1/2 whitespace-nowrap"
+              style={{ left: `${pct(ms)}%` }}
+            >
+              {new Date(ms).toUTCString().slice(5, 11)}
+            </span>
+          ))}
+          {landfallPct >= 0 && landfallPct <= 100 && (
+            <span
+              className="label absolute top-0 -translate-x-1/2 !text-[var(--accent)]"
+              style={{ left: `${landfallPct}%` }}
+            >
+              landfall
+            </span>
+          )}
+        </div>
+        <div className="relative">
+          {landfallPct >= 0 && landfallPct <= 100 && (
+            <span
+              className="pointer-events-none absolute top-1/2 h-3 w-px -translate-y-1/2 bg-[var(--accent)]"
+              style={{ left: `${landfallPct}%` }}
+              aria-hidden
+            />
+          )}
+          <input
+            type="range"
+            min={start}
+            max={end}
+            step={STEP_MS}
+            value={value}
+            onChange={(event) => onChange(Number(event.target.value))}
+            className="scrub w-full cursor-pointer"
+            aria-label="Replay time"
+          />
+        </div>
       </div>
-      <div className="w-80 shrink-0 text-right">
-        <div className="font-mono text-sm tabular-nums text-[var(--text-primary)]">{utcAndIst(iso)}</div>
-        <div className="text-xs text-[var(--text-secondary)]">{leadLabel(iso, landfall)} to landfall</div>
+      <div className="hidden w-52 shrink-0 text-right sm:block">
+        <div className="readout text-xl font-medium text-[var(--text-primary)]">{istStamp(iso)}</div>
+        <div className="label mt-0.5">
+          {utc} · {leadLabel(iso, landfall)}
+        </div>
       </div>
     </div>
   );

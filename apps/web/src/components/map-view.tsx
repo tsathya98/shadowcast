@@ -3,7 +3,7 @@
 import type { PickingInfo } from "@deck.gl/core";
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
-import { APIProvider, ColorScheme, Map as GoogleMap, useMap } from "@vis.gl/react-google-maps";
+import { APIProvider, Map as GoogleMap, useMap } from "@vis.gl/react-google-maps";
 import { useEffect, useMemo, useRef } from "react";
 
 import { assetValue, type ColorBy, kindLabel, percent, type Rgb, riskColor } from "@/lib/format";
@@ -25,8 +25,29 @@ interface MapViewProps {
 }
 
 const WHITE: Rgb = [255, 255, 255];
-const MEMBER_BLUE: [number, number, number, number] = [57, 135, 229, 110];
-const STORM_RED: Rgb = [208, 59, 59];
+const VOID: Rgb = [14, 16, 18];
+const MEMBER: [number, number, number, number] = [127, 167, 217, 95]; // --member: cool and recessive under the risk dots
+const AMBER: Rgb = [242, 138, 46]; // --accent
+
+// Near-black cartography: land in the panel tone, water in the void, faint boundaries and town names only, so the
+// storm and the risk dots are the only light on the map.
+const MAP_STYLE: google.maps.MapTypeStyle[] = [
+  { elementType: "geometry", stylers: [{ color: "#16191d" }] },
+  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#7d8797" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#0e1012" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0a0c0e" }] },
+  { featureType: "water", elementType: "labels", stylers: [{ visibility: "off" }] },
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+  { featureType: "road", stylers: [{ visibility: "off" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ visibility: "on" }, { color: "#20242a" }] },
+  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#2b3038" }] },
+  { featureType: "administrative.province", elementType: "geometry.stroke", stylers: [{ color: "#3a414c" }] },
+  { featureType: "administrative.neighborhood", stylers: [{ visibility: "off" }] },
+  { featureType: "administrative.land_parcel", stylers: [{ visibility: "off" }] },
+  { featureType: "landscape.natural.terrain", stylers: [{ visibility: "off" }] },
+];
 
 function lines(collection: TrackFeatureCollection | undefined): Path[] {
   return (collection?.features ?? [])
@@ -47,7 +68,7 @@ function DeckOverlay({ layers, tooltip }: { layers: unknown[]; tooltip: (info: P
     if (!map) return;
     let instance: GoogleMapsOverlay | null = null;
     const attach = () => {
-      instance = new GoogleMapsOverlay({ interleaved: true });
+      instance = new GoogleMapsOverlay({ interleaved: false }); // the styled basemap is a raster map
       instance.setProps({ layers: latest.current.layers as never[], getTooltip: latest.current.tooltip });
       instance.setMap(map);
       overlay.current = instance;
@@ -88,8 +109,9 @@ export function MapView(props: MapViewProps) {
       getPosition: (a) => [a.lon, a.lat],
       getFillColor: (a) => [...riskColor(assetValue(a, colorBy, windById)), 200] as [number, number, number, number],
       getRadius: (a) => 2 + 3.5 * assetValue(a, colorBy, windById), // small enough that dense clusters stay legible
-      getLineColor: (a) => (a.asset_id === selectedId ? [255, 255, 255, 255] : [20, 20, 20, 160]),
-      getLineWidth: (a) => (a.asset_id === selectedId ? 2.5 : 0.6),
+      getLineColor: (a) =>
+        (a.asset_id === selectedId ? [...WHITE, 255] : [...VOID, 200]) as [number, number, number, number],
+      getLineWidth: (a) => (a.asset_id === selectedId ? 3 : 0.6),
       radiusUnits: "pixels",
       lineWidthUnits: "pixels",
       stroked: true,
@@ -106,7 +128,7 @@ export function MapView(props: MapViewProps) {
       id: "ensemble",
       data: lines(members),
       getPath: (p) => p.path,
-      getColor: MEMBER_BLUE,
+      getColor: MEMBER,
       widthUnits: "pixels",
       getWidth: 1.5,
     });
@@ -126,10 +148,10 @@ export function MapView(props: MapViewProps) {
       radiusUnits: "meters",
       stroked: true,
       filled: true,
-      getFillColor: [...STORM_RED, 40] as [number, number, number, number],
-      getLineColor: [...STORM_RED, 255] as [number, number, number, number],
+      getFillColor: [...AMBER, 45] as [number, number, number, number],
+      getLineColor: [...WHITE, 235] as [number, number, number, number],
       lineWidthUnits: "pixels",
-      getLineWidth: 2,
+      getLineWidth: 1.5,
     });
     return [memberLayer, trackLayer, assetLayer, stormLayer];
   }, [assets, colorBy, windById, members, track, storm, selectedId, onSelect]);
@@ -148,8 +170,8 @@ export function MapView(props: MapViewProps) {
     <APIProvider apiKey={apiKey}>
       <GoogleMap
         className="absolute inset-0" // size from the positioned parent: % heights collapse inside grid-stretched items
-        mapId="DEMO_MAP_ID"
-        colorScheme={ColorScheme.DARK}
+        styles={MAP_STYLE}
+        backgroundColor="#0e1012"
         defaultCenter={{ lat: 20.3, lng: 86.0 }}
         defaultZoom={7}
         gestureHandling="greedy"

@@ -63,6 +63,12 @@ export function utcAndIst(iso: string | null | undefined): string {
   return `${utc} UTC · ${sameDay ? ist.split(" ")[2] : ist} IST`;
 }
 
+/** An ISO instant in IST with its date, e.g. "3 May 08:45 IST" (or "–" when missing). */
+export function istStamp(iso: string | null | undefined): string {
+  const ms = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isNaN(ms) ? "–" : `${stamp(ms, IST_OFFSET_MS)} IST`;
+}
+
 /** Signed hours from `iso` to `reference`, e.g. "T−15 h" before landfall or "T+3 h" after. */
 export function leadLabel(iso: string, reference: string): string {
   const hours = Math.round((Date.parse(reference) - Date.parse(iso)) / MS_PER_HOUR);
