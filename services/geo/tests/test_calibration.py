@@ -8,6 +8,7 @@ from shadowcast_geo.calibration import (
     fit_outage_model,
     loss_by_band,
     roc_auc,
+    spatial_holdout,
     spearman,
 )
 
@@ -106,3 +107,25 @@ def test_loss_by_band_skips_empty_bands() -> None:
     assert [(b["low_kt"], b["high_kt"], b["n"]) for b in bands] == [(0, 60, 2), (100, 130, 3)]
     assert bands[1]["median"] == 80.0
     assert bands[0]["p25"] == 2.5
+
+
+def test_spatial_holdout_scores_every_block_out_of_fold() -> None:
+    lat = np.linspace(19.0, 21.5, 32)
+    wind = np.tile([40.0, 60.0, 100.0, 120.0], 8)
+    loss = np.where(wind > 80, 90.0, 5.0)
+
+    result = spatial_holdout(lat, wind, loss, 50.0, folds=4)
+
+    assert (result["folds"], result["n"]) == (4, 32.0)
+    assert result["auc"] == 1.0
+    assert result["brier"] < 0.05
+    assert [b["n"] for b in result["blocks"]] == [8.0] * 4
+    assert (result["blocks"][0]["lat_min"], result["blocks"][-1]["lat_max"]) == (19.0, 21.5)
+    assert all(b["auc"] == 1.0 and b["observed_outage_rate"] == 0.5 for b in result["blocks"])
+
+
+def test_spatial_holdout_needs_both_outcomes_in_training() -> None:
+    lat = np.array([19.0, 19.5, 20.0, 20.5])
+
+    with pytest.raises(ValueError, match="positive and one negative"):
+        spatial_holdout(lat, np.array([40.0, 50.0, 110.0, 120.0]), np.array([0.0, 0.0, 90.0, 90.0]), 50.0, folds=2)

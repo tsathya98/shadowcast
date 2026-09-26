@@ -25,6 +25,15 @@ export interface OutageModel {
   brier: number | null;
 }
 
+/** Spatial cross-validation on the reference storm: each south-to-north block of coast held out in turn. */
+export interface SpatialHoldout {
+  folds: number;
+  n: number;
+  auc: number | null;
+  brier: number | null;
+  blocks: { lat_min: number; lat_max: number; n: number; observed_outage_rate: number; auc: number | null }[];
+}
+
 export interface Skill {
   n: number;
   observed_outage_rate: number | null;
@@ -32,6 +41,7 @@ export interface Skill {
   brier: number | null;
   spearman: number | null;
   out_of_sample: boolean;
+  spatial_holdout?: SpatialHoldout;
 }
 
 export interface LossBand {

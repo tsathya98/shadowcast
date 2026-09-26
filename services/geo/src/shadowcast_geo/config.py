@@ -40,6 +40,7 @@ POPULATION_RADIUS_M = 2000
 NIGHT_LIGHTS_RADIUS_M = 1500
 LIT_RADIANCE = 1.0  # nW/cm2/sr; below this, percentage loss is dominated by noise
 OUTAGE_LOSS_PCT = 50.0  # an asset "lost power" when its night-light radiance fell by at least this much
+HOLDOUT_FOLDS = 5  # spatial cross-validation blocks along the reference coast
 LOW_LYING_M = 5.0
 LOSS_BANDS_KT = (0, 60, 80, 100, 130)
 
@@ -135,6 +136,14 @@ ODISHA_COAST = Region(
     ),
 )
 
+WEST_BENGAL_COAST = Region(
+    id="west-bengal-coast",
+    name="West Bengal coast (Digha to Kolkata and the Sundarbans)",
+    bbox=(21.5, 87.4, 23.0, 89.0),
+)
+
+# Night-light windows follow one rule for every storm: about two weeks ending just before the storm's approach, and
+# the seven nights after landfall.
 SCENARIOS: dict[str, Scenario] = {
     scenario.id: scenario
     for scenario in (
@@ -160,6 +169,17 @@ SCENARIOS: dict[str, Scenario] = {
                 datetime(2024, 10, day, hour, tzinfo=UTC)
                 for day, hour in ((22, 0), (22, 12), (23, 0), (23, 12), (24, 0))
             ),
+        ),
+        # Held-out strong storm in a different state and grid; it predates ECMWF open data, so there is no as-issued
+        # forecast replay. Both night-light windows fall inside India's COVID-19 lockdown.
+        Scenario(
+            id="amphan-2020",
+            storm="AMPHAN",
+            season=2020,
+            region=WEST_BENGAL_COAST,
+            landfall=datetime(2020, 5, 20, 11, 0, tzinfo=UTC),  # IMD: crossed near the Sundarbans 15:30-17:30 IST
+            truth_pre=(date(2020, 5, 5), date(2020, 5, 19)),
+            truth_post=(date(2020, 5, 21), date(2020, 5, 28)),
         ),
     )
 }

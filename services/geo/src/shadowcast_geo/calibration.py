@@ -2,7 +2,8 @@
 
 The outage model is a one-feature logistic regression, ``P(outage | wind) = 1 / (1 + exp(-(a + b * wind)))``, fitted
 on observed night-light loss after a reference cyclone. It is deliberately simple: two coefficients that a district
-officer can read, validated out of sample on other storms.
+officer can read, validated out of sample on other storms and, within the reference storm, on held-out stretches of
+coast.
 """
 
 from __future__ import annotations
@@ -175,6 +176,56 @@ def evaluate(model: OutageModel, wind_kt: FloatArray, loss_pct: FloatArray, thre
         "auc": roc_auc(y, p),
         "brier": float(np.mean((p - y) ** 2)) if y.size else float("nan"),
         "spearman": spearman(wind_kt, loss_pct),
+    }
+
+
+def spatial_holdout(
+    lat: FloatArray, wind_kt: FloatArray, loss_pct: FloatArray, threshold_pct: float, folds: int
+) -> dict[str, Any]:
+    """Spatial cross-validation: refit the model with each south-to-north block of the coast held out in turn.
+
+    Blocks are contiguous in latitude and equal in size, so every prediction comes from a model that never saw that
+    stretch of coast. The pooled score measures generalisation across the region; the per-block scores (defined only
+    where a block holds both outcomes) measure discrimination within one stretch, which is the stricter test.
+
+    Args:
+        lat: Latitude per asset.
+        wind_kt: Modelled peak wind per asset.
+        loss_pct: Observed night-light loss per asset (percent).
+        threshold_pct: Loss at or above which an asset counts as having lost power.
+        folds: Number of blocks.
+
+    Returns:
+        dict[str, Any]: ``folds``, ``n``, pooled out-of-fold ``auc`` and ``brier``, and ``blocks`` (each with
+        ``lat_min``, ``lat_max``, ``n``, ``observed_outage_rate`` and ``auc``).
+
+    Raises:
+        ValueError: If a training split lacks either outcome.
+    """
+    y = (loss_pct >= threshold_pct).astype(float)
+    p = np.empty_like(wind_kt)
+    blocks: list[dict[str, float]] = []
+    for held in np.array_split(np.argsort(lat, kind="stable"), folds):
+        train = np.ones(y.size, dtype=bool)
+        train[held] = False
+        intercept, slope = fit_logistic(wind_kt[train], y[train])
+        model = OutageModel(intercept, slope, "holdout", int(train.sum()), float("nan"), float("nan"))
+        p[held] = model.predict(wind_kt[held])
+        blocks.append(
+            {
+                "lat_min": float(lat[held].min()),
+                "lat_max": float(lat[held].max()),
+                "n": float(held.size),
+                "observed_outage_rate": float(y[held].mean()),
+                "auc": roc_auc(y[held], p[held]),
+            }
+        )
+    return {
+        "folds": folds,
+        "n": float(y.size),
+        "auc": roc_auc(y, p),
+        "brier": float(np.mean((p - y) ** 2)),
+        "blocks": blocks,
     }
 
 

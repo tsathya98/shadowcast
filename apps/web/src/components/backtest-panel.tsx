@@ -38,6 +38,8 @@ function Tile({ label, value, hint }: { label: string; value: string; hint: stri
 export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
   const { data } = useBacktest(scenario.id);
   const { skill } = scenario;
+  const holdout = skill.spatial_holdout;
+  const blockAucs = (holdout?.blocks ?? []).flatMap((b) => (b.auc == null ? [] : [b.auc]));
   const lit = (data?.substations ?? []).filter((s) => s.lit && s.loss_pct != null && s.peak_wind_kt != null);
   const bands = scenario.loss_by_band.map((b) => ({
     band: `${b.low_kt}–${b.high_kt}`,
@@ -64,6 +66,17 @@ export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
         />
         <Tile label="Went dark" value={percent(skill.observed_outage_rate)} hint="≥ 50% light loss" />
       </div>
+
+      {holdout && (
+        <p className="rounded-lg bg-white/5 px-3 py-2 text-xs text-[var(--text-secondary)]">
+          <span className="font-medium text-[var(--text-primary)]">Spatial holdout.</span> Refitted {holdout.folds}{" "}
+          times, each time hiding one stretch of coast from south to north: out-of-fold AUC{" "}
+          <span className="font-mono text-[var(--text-primary)]">{holdout.auc?.toFixed(2) ?? "–"}</span>, Brier{" "}
+          <span className="font-mono text-[var(--text-primary)]">{holdout.brier?.toFixed(3) ?? "–"}</span>.
+          {blockAucs.length > 0 &&
+            ` Within the held-out stretches that had outages, AUC ${Math.min(...blockAucs).toFixed(2)}–${Math.max(...blockAucs).toFixed(2)}.`}
+        </p>
+      )}
 
       <section aria-label="Median night-light loss by modelled wind band">
         <h3 className="mb-1 text-xs uppercase tracking-wide text-[var(--text-muted)]">

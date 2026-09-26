@@ -75,6 +75,8 @@ def test_main_builds_every_scenario(pipeline: LocalArtifacts) -> None:
     assert model["model"]["auc"] == 1.0
     fani = pipeline.read_json("scenarios/fani-2019/scenario.json")
     assert fani["skill"]["out_of_sample"] is False
+    assert fani["skill"]["spatial_holdout"]["folds"] == 5
+    assert "spatial_holdout" not in pipeline.read_json("scenarios/dana-2024/scenario.json")["skill"]
     assert fani["asset_counts"] == {"substation": 8, "cyclone_shelter": 1}
     dana = pipeline.read_json("scenarios/dana-2024/scenario.json")
     assert dana["skill"]["out_of_sample"] is True

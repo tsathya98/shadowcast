@@ -64,7 +64,10 @@ function instructions(scenario: ScenarioDetail, context: AgentContext): string {
   const backtest = forecast
     ? ""
     : `
-- Backtest for this storm (${skill.out_of_sample ? "out of sample" : "in sample"}): AUC ${skill.auc?.toFixed(2) ?? "n/a"}, Spearman ${skill.spearman?.toFixed(2) ?? "n/a"}. Loss by modelled wind: ${bands || "not available"}.`;
+- Backtest for this storm (${skill.out_of_sample ? "out of sample: the model was never fitted on it" : "in sample"}): AUC ${skill.auc?.toFixed(2) ?? "n/a"}, Brier ${skill.brier?.toFixed(3) ?? "n/a"}, Spearman ${skill.spearman?.toFixed(2) ?? "n/a"}. Loss by modelled wind: ${bands || "not available"}.` +
+      (skill.spatial_holdout
+        ? ` Spatial holdout (${skill.spatial_holdout.folds} stretches of coast each hidden in turn): out-of-fold AUC ${skill.spatial_holdout.auc?.toFixed(2) ?? "n/a"}.`
+        : "");
   return `You are ShadowCast's duty analyst, working beside a district emergency operations officer in Odisha, India.
 
 Storm: ${scenario.storm} ${scenario.season}, ${scenario.region.name}. Landfall ${utcAndIst(scenario.landfall)}.

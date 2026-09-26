@@ -23,8 +23,9 @@ import pandas as pd
 
 from shadowcast_geo import earth
 from shadowcast_geo.artifacts import ArtifactStore, artifact_store
-from shadowcast_geo.calibration import OutageModel, evaluate, fit_outage_model, loss_by_band
+from shadowcast_geo.calibration import OutageModel, evaluate, fit_outage_model, loss_by_band, spatial_holdout
 from shadowcast_geo.config import (
+    HOLDOUT_FOLDS,
     LIT_RADIANCE,
     LOSS_BANDS_KT,
     OUTAGE_LOSS_PCT,
@@ -209,7 +210,7 @@ def build_scenario(
     assets = earth.enrich(assets.assign(**hazard))
 
     substations = assets[assets["kind"] == "substation"]
-    truth = substations[["asset_id", "peak_wind_kt"]].join(
+    truth = substations[["asset_id", "lat", "lon", "peak_wind_kt"]].join(
         earth.nightlight_loss(substations, scenario.truth_pre, scenario.truth_post)
     )
     truth["lit"] = truth["ntl_pre"] >= LIT_RADIANCE
@@ -223,13 +224,16 @@ def build_scenario(
     elif model is None:
         raise ValueError(f"{scenario.id} needs the reference outage model; build the reference scenario first")
     reference_bands = bands if scenario.reference else store.read_json(MODEL_PATH)["bands"]
-    skill = {**evaluate(model, wind, loss, OUTAGE_LOSS_PCT), "out_of_sample": not scenario.reference}
+    skill: dict[str, Any] = {**evaluate(model, wind, loss, OUTAGE_LOSS_PCT), "out_of_sample": not scenario.reference}
+    if scenario.reference:
+        lat = lit["lat"].to_numpy(dtype=float)
+        skill["spatial_holdout"] = spatial_holdout(lat, wind, loss, OUTAGE_LOSS_PCT, HOLDOUT_FOLDS)
 
     assets = assets.merge(
         truth[["asset_id", "loss_pct"]].rename(columns={"loss_pct": "observed_loss_pct"}), on="asset_id", how="left"
     )
     ranked = rank_assets(assets, model, scenario.landfall, reference_bands)
-    backtest = truth.merge(ranked[["asset_id", "name", "lat", "lon", "p_outage"]], on="asset_id")
+    backtest = truth.merge(ranked[["asset_id", "name", "p_outage"]], on="asset_id")
     forecasts: list[dict[str, Any]] = []
     if scenario.forecasts:
         landfall_at = track_position(track, scenario.landfall)
@@ -271,7 +275,7 @@ def build_scenario(
     store.write_json(
         f"{prefix}/backtest.json",
         {
-            "skill": skill,
+            "skill": summary["skill"],  # JSON-safe: block AUCs are NaN where a block has one outcome
             "loss_by_band": bands,
             "substations": frame_records(
                 backtest,
