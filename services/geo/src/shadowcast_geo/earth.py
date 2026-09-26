@@ -6,7 +6,6 @@ server-side requests regardless of asset count.
 
 from __future__ import annotations
 
-import math
 from datetime import date
 from typing import Any
 
@@ -16,7 +15,6 @@ import pandas as pd
 
 from shadowcast_geo.config import (
     ELEVATION,
-    LAND_COVER,
     NIGHT_LIGHTS,
     NIGHT_LIGHTS_BAND,
     NIGHT_LIGHTS_QUALITY_BAND,
@@ -24,8 +22,6 @@ from shadowcast_geo.config import (
     POPULATION,
     POPULATION_RADIUS_M,
     POPULATION_YEAR,
-    ROUGHNESS_M,
-    ROUGHNESS_RADIUS_M,
 )
 
 
@@ -66,17 +62,13 @@ def _reduce(
 
 
 def enrich(assets: pd.DataFrame) -> pd.DataFrame:
-    """Add population, ground elevation and surface roughness per asset.
-
-    Population is the WorldPop sum within ``POPULATION_RADIUS_M``; elevation comes from the Copernicus DEM; roughness
-    is the log-mean of ESA WorldCover roughness lengths within ``ROUGHNESS_RADIUS_M`` (the upwind fetch).
+    """Add population within ``POPULATION_RADIUS_M`` (WorldPop) and ground elevation (Copernicus DEM) per asset.
 
     Args:
         assets: Frame with ``lat`` and ``lon``.
 
     Returns:
-        pd.DataFrame: A copy with ``population`` (people), ``elevation_m`` and ``roughness_m`` columns (NaN where
-        unavailable).
+        pd.DataFrame: A copy with ``population`` (people) and ``elevation_m`` columns (NaN where unavailable).
     """
     population = (
         ee.ImageCollection(POPULATION)
@@ -85,18 +77,12 @@ def enrich(assets: pd.DataFrame) -> pd.DataFrame:
         .select("population")
     )
     elevation = ee.ImageCollection(ELEVATION).select("DEM").mosaic()
-    classes = list(ROUGHNESS_M)
-    log_roughness = (
-        ee.ImageCollection(LAND_COVER).first().select("Map").remap(classes, [math.log(ROUGHNESS_M[c]) for c in classes])
-    )
     people = _reduce(assets, population, ee.Reducer.sum(), 100, POPULATION_RADIUS_M)
     height = _reduce(assets, elevation, ee.Reducer.mean(), 30)
-    rough = _reduce(assets, log_roughness, ee.Reducer.mean(), 30, ROUGHNESS_RADIUS_M)
     enriched = assets.copy()
     enriched["population"] = [people.get(i, {}).get("sum", np.nan) for i in range(len(assets))]
     enriched["elevation_m"] = [height.get(i, {}).get("mean", np.nan) for i in range(len(assets))]
-    enriched["roughness_m"] = [np.exp(rough.get(i, {}).get("mean") or np.nan) for i in range(len(assets))]
-    return enriched.astype({"population": float, "elevation_m": float, "roughness_m": float})
+    return enriched.astype({"population": float, "elevation_m": float})
 
 
 def nightlight_loss(points: pd.DataFrame, pre: tuple[date, date], post: tuple[date, date]) -> pd.DataFrame:

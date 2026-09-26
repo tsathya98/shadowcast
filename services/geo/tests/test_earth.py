@@ -30,10 +30,8 @@ def test_initialize(ee: MagicMock) -> None:
 def test_enrich_adds_population_and_elevation(ee: MagicMock) -> None:
     population = ee.ImageCollection.return_value.filter.return_value.mosaic.return_value.select.return_value
     elevation = ee.ImageCollection.return_value.select.return_value.mosaic.return_value
-    land_cover = ee.ImageCollection.return_value.first.return_value.select.return_value.remap.return_value
     population.reduceRegions.return_value.getInfo.return_value = _features({"sum": 1200.0}, {"sum": None})
     elevation.reduceRegions.return_value.getInfo.return_value = _features({"mean": 3.5})
-    land_cover.reduceRegions.return_value.getInfo.return_value = _features({"mean": np.log(0.5)}, {"mean": None})
 
     enriched = earth.enrich(POINTS)
 
@@ -41,10 +39,7 @@ def test_enrich_adds_population_and_elevation(ee: MagicMock) -> None:
     assert np.isnan(enriched["population"].iloc[1])
     assert enriched["elevation_m"].tolist()[0] == 3.5
     assert np.isnan(enriched["elevation_m"].iloc[1])
-    assert enriched["roughness_m"].iloc[0] == pytest.approx(0.5)
-    assert np.isnan(enriched["roughness_m"].iloc[1])
-    ee.Geometry.Point.return_value.buffer.assert_any_call(2000)
-    ee.Geometry.Point.return_value.buffer.assert_any_call(1000)
+    ee.Geometry.Point.return_value.buffer.assert_called_with(2000)
 
 
 def test_nightlight_loss(ee: MagicMock) -> None:

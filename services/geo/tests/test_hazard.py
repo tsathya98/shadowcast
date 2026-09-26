@@ -5,12 +5,10 @@ import pytest
 
 from shadowcast_geo.hazard import (
     Track,
-    decay_inland,
     exposure,
     geodesics,
     holland_wind,
     radii_to_km,
-    terrain_factor,
     track_position,
     willoughby_rmw_km,
     wind_at,
@@ -131,41 +129,3 @@ def test_willoughby_rmw_km() -> None:
 
 def test_radii_to_km() -> None:
     assert radii_to_km([10.0, None, float("nan"), 0.0]) == [18.5, None, None, 0.0]
-
-
-def test_decay_inland_caps_only_after_landfall() -> None:
-    fixes = make_fixes()  # 100 kt throughout, fixes every 3 h from START
-    landfall = START + timedelta(hours=6)
-
-    decayed = decay_inland(fixes, landfall)
-
-    assert [f["vmax_kt"] for f in decayed[:3]] == [100.0, 100.0, 100.0]  # up to and including landfall
-    # 3 h after landfall: 26.7 + (0.9 * 100 - 26.7) * exp(-0.095 * 3)
-    assert decayed[3]["vmax_kt"] == pytest.approx(74.3, abs=0.1)
-    assert decayed[3]["vmax_kt"] > decayed[4]["vmax_kt"] > decayed[6]["vmax_kt"] > 26.7
-    assert decay_inland(fixes, START - timedelta(days=1)) is fixes  # landfall outside the track
-
-
-def test_decay_inland_keeps_best_track_values_that_decay_faster() -> None:
-    fixes = [{**fix, "vmax_kt": 20.0} if i else fix for i, fix in enumerate(make_fixes())]
-
-    assert [f["vmax_kt"] for f in decay_inland(fixes, START)] == [100.0] + [20.0] * 6
-
-
-@pytest.mark.parametrize(("roughness", "expected"), [(0.0002, 1.0), (0.05, 0.723), (0.5, 0.481), (float("nan"), 0.765)])
-def test_terrain_factor(roughness: float, expected: float) -> None:
-    assert terrain_factor(np.array([roughness]))[0] == pytest.approx(expected, abs=0.002)
-
-
-def test_terrain_factor_scales_every_hazard_view(track: Track) -> None:
-    lat, lon = np.array([19.5, 19.5]), np.array([86.4, 86.4])
-    factor = np.array([1.0, 0.5])
-    when = START + timedelta(hours=9)
-
-    peak = exposure(lat, lon, track, factor)["peak_wind_kt"]
-    now = wind_at(lat, lon, track, when, factor)
-    _, timeline = wind_timeline(19.5, 86.4, track, 0.5)
-
-    assert peak[1] == pytest.approx(peak[0] / 2)
-    assert now[1] == pytest.approx(now[0] / 2)
-    assert np.nanmax(timeline) == pytest.approx(peak[1])

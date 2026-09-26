@@ -35,7 +35,7 @@ from shadowcast_geo.config import (
     Settings,
 )
 from shadowcast_geo.ensemble import ensemble_impact, load_ensemble, select_storm
-from shadowcast_geo.hazard import Track, decay_inland, exposure, terrain_factor, track_position
+from shadowcast_geo.hazard import Track, exposure, track_position
 from shadowcast_geo.inputs import load_assets, load_best_track
 from shadowcast_geo.ranking import rank_assets
 
@@ -61,7 +61,6 @@ ASSET_FIELDS = [
     "gale_arrival",
     "population",
     "elevation_m",
-    "terrain_factor",
     "criticality",
     "p_outage",
     "score",
@@ -69,24 +68,12 @@ ASSET_FIELDS = [
     "reasons",
 ]
 FORECAST_FIELDS = [*ASSET_FIELDS, "p34", "p64", "wind_p10", "wind_p90", "members"]
-STATIC_FIELDS = [
-    "asset_id",
-    "kind",
-    "name",
-    "source",
-    "lat",
-    "lon",
-    "population",
-    "elevation_m",
-    "terrain_factor",
-    "observed_loss_pct",
-]
+STATIC_FIELDS = ["asset_id", "kind", "name", "source", "lat", "lon", "population", "elevation_m", "observed_loss_pct"]
 ROUNDING = {
     "peak_wind_kt": 1,
     "min_dist_km": 1,
     "population": 0,
     "elevation_m": 1,
-    "terrain_factor": 3,
     "p_outage": 4,
     "p34": 3,
     "p64": 3,
@@ -166,12 +153,11 @@ def build_forecasts(
         list[dict[str, Any]]: One summary per issue time, in issue order.
     """
     lat, lon = assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float)
-    factor = assets["terrain_factor"].to_numpy(dtype=float)
     static = assets[[column for column in STATIC_FIELDS if column in assets]]
     summaries: list[dict[str, Any]] = []
     for issued in scenario.forecasts:
         storm = select_storm(load_ensemble(client, settings, issued), target)
-        impact = ensemble_impact(lat, lon, storm, model, factor)
+        impact = ensemble_impact(lat, lon, storm, model)
         no_band_entry = pd.Series(pd.NaT, index=static.index, dtype="datetime64[s]")
         frame = static.assign(**impact, band_kt=0, band_entry=no_band_entry, members=len(storm.members))
         ranked = rank_assets(frame, model, scenario.landfall, reference_bands, issued)
@@ -217,12 +203,11 @@ def build_scenario(
         ValueError: If a non-reference scenario is built without a model.
     """
     logger.info("building %s", scenario.id)
-    fixes = decay_inland(load_best_track(client, settings, scenario.storm, scenario.season), scenario.landfall)
+    fixes = load_best_track(client, settings, scenario.storm, scenario.season)
     track = Track.from_records(fixes)
-    assets = earth.enrich(load_assets(client, settings, scenario.region))
-    assets["terrain_factor"] = terrain_factor(assets["roughness_m"].to_numpy(dtype=float))
-    lat, lon = assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float)
-    assets = assets.assign(**exposure(lat, lon, track, assets["terrain_factor"].to_numpy(dtype=float)))
+    assets = load_assets(client, settings, scenario.region)
+    hazard = exposure(assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float), track)
+    assets = earth.enrich(assets.assign(**hazard))
 
     substations = assets[assets["kind"] == "substation"]
     truth = substations[["asset_id", "lat", "lon", "peak_wind_kt"]].join(

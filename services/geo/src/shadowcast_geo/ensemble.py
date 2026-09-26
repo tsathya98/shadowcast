@@ -191,7 +191,7 @@ def select_storm(forecasts: list[StormForecast], target: tuple[float, float]) ->
 
 
 def ensemble_impact(
-    lat: FloatArray, lon: FloatArray, storm: StormForecast, model: OutageModel, factor: FloatArray | float = 1.0
+    lat: FloatArray, lon: FloatArray, storm: StormForecast, model: OutageModel
 ) -> dict[str, NDArray[Any]]:
     """Run the hazard for every member and aggregate impact probabilities per asset.
 
@@ -200,7 +200,6 @@ def ensemble_impact(
         lon: Asset longitudes, shape ``(n_assets,)``.
         storm: The ensemble forecast.
         model: Calibrated outage model applied to each member's peak wind.
-        factor: Terrain factor per asset (members carry their own inland decay, so only roughness is applied).
 
     Returns:
         dict[str, NDArray[Any]]: Per asset: ``p_outage`` (member mean), ``p34`` and ``p64`` (share of members
@@ -208,7 +207,7 @@ def ensemble_impact(
         ``min_dist_km`` (median closest approach), and the median ``closest_time``, ``peak_time`` and ``gale_arrival``
         (over members where defined; NaT otherwise).
     """
-    results = [exposure(lat, lon, Track.from_records(fixes), factor) for fixes in storm.members.values()]
+    results = [exposure(lat, lon, Track.from_records(fixes)) for fixes in storm.members.values()]
     peak = np.vstack([r["peak_wind_kt"] for r in results])  # (members, assets)
     reached = np.nan_to_num(peak, nan=0.0)  # a member that never reaches an asset contributes calm (0 kt)
     p10, p50, p90 = np.percentile(reached, [10, 50, 90], axis=0)

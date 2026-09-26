@@ -14,9 +14,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from shadowcast_geo.config import (
-    DECAY_ALPHA_PER_H,
-    DECAY_BACKGROUND_KT,
-    DECAY_LANDFALL_REDUCTION,
     DENSIFY_STEP_MINUTES,
     EARTH_RADIUS_KM,
     GALE_KT,
@@ -24,8 +21,6 @@ from shadowcast_geo.config import (
     KT_PER_MS,
     NM_TO_KM,
     WIND_BANDS_KT,
-    Z0_OPEN_M,
-    Z0_SEA_M,
 )
 
 FloatArray = NDArray[np.float64]
@@ -166,56 +161,7 @@ def willoughby_rmw_km(vmax_kt: FloatArray, lat: FloatArray) -> FloatArray:
     return 46.4 * np.exp(-0.0155 * vmax_kt / KT_PER_MS + 0.0169 * np.abs(lat))
 
 
-def decay_inland(fixes: list[dict[str, Any]], landfall: datetime) -> list[dict[str, Any]]:
-    """Cap intensity after landfall with the Kaplan & DeMaria (1995) inland decay model.
-
-    ``V(t) = Vb + (R * V0 - Vb) * exp(-alpha * t)``, with ``t`` hours after landfall and ``V0`` the intensity at
-    landfall. Best-track intensities over land are sparse analyses that can decay too slowly (Amphan's JTWC track keeps
-    95 kt an hour after landfall), so the modelled value replaces a fix's intensity only where it is lower.
-
-    Args:
-        fixes: Track fix records (the ``track.json`` format).
-        landfall: Official landfall time (timezone-aware UTC).
-
-    Returns:
-        list[dict[str, Any]]: Fix records with post-landfall ``vmax_kt`` capped (unchanged when landfall lies outside
-        the track).
-    """
-    at = track_position(Track.from_records(fixes), landfall)
-    if at is None:
-        return fixes
-    decayed: list[dict[str, Any]] = []
-    for record in fixes:
-        fix = record
-        hours = (datetime.fromisoformat(fix["time"].replace("Z", "+00:00")) - landfall).total_seconds() / 3600
-        if hours > 0:
-            cap = DECAY_BACKGROUND_KT + (DECAY_LANDFALL_REDUCTION * at["vmax_kt"] - DECAY_BACKGROUND_KT) * np.exp(
-                -DECAY_ALPHA_PER_H * hours
-            )
-            fix = {**fix, "vmax_kt": round(float(min(fix["vmax_kt"], cap)), 1)}
-        decayed.append(fix)
-    return decayed
-
-
-def terrain_factor(roughness_m: FloatArray) -> FloatArray:
-    """Ratio of the 10 m wind over terrain of roughness length ``z0`` to the 10 m wind over open sea.
-
-    Uses the ESDU / Simiu & Scanlan conversion for the same gradient wind,
-    ``(z0 / z0_sea) ** 0.0706 * ln(10 / z0) / ln(10 / z0_sea)``: about 0.72 over cropland and 0.48 over built-up land.
-
-    Args:
-        roughness_m: Effective roughness length per asset in metres (NaN where unknown: open terrain is assumed).
-
-    Returns:
-        FloatArray: Multiplicative factor on the parametric (over-water) wind, 1.0 over open sea.
-    """
-    z0 = np.where(np.isfinite(roughness_m), roughness_m, Z0_OPEN_M)
-    return (z0 / Z0_SEA_M) ** 0.0706 * np.log(10.0 / z0) / np.log(10.0 / Z0_SEA_M)
-
-
-def exposure(
-    lat: FloatArray, lon: FloatArray, track: Track, factor: FloatArray | float = 1.0
-) -> dict[str, NDArray[Any]]:
+def exposure(lat: FloatArray, lon: FloatArray, track: Track) -> dict[str, NDArray[Any]]:
     """Peak modelled wind, closest approach and first entry into each wind-radius band for every asset.
 
     For each fix, the asset's bearing from the storm centre selects the quadrant radius; the asset is inside a band
@@ -225,7 +171,6 @@ def exposure(
         lat: Asset latitudes, shape ``(n_assets,)``.
         lon: Asset longitudes, shape ``(n_assets,)``.
         track: The storm track.
-        factor: Terrain factor per asset (see :func:`terrain_factor`), or one value for all.
 
     Returns:
         dict[str, NDArray[Any]]: ``peak_wind_kt``, ``peak_time``, ``min_dist_km``, ``closest_time``, ``band_kt``
@@ -235,7 +180,7 @@ def exposure(
     """
     track = track.densify()
     distance, bearing = geodesics(lat, lon, track.lat, track.lon)
-    wind = holland_wind(distance, track.vmax_kt, track.rmw_km) * np.reshape(factor, (-1, 1))
+    wind = holland_wind(distance, track.vmax_kt, track.rmw_km)
     filled = np.where(np.isnan(wind), -np.inf, wind)
     valid = np.isfinite(filled).any(axis=1)
     peak_index = filled.argmax(axis=1)
@@ -261,23 +206,20 @@ def exposure(
     }
 
 
-def wind_timeline(
-    lat: float, lon: float, track: Track, factor: float = 1.0
-) -> tuple[NDArray[np.datetime64], FloatArray]:
+def wind_timeline(lat: float, lon: float, track: Track) -> tuple[NDArray[np.datetime64], FloatArray]:
     """Modelled wind at one asset through the storm's life, on the densified track.
 
     Args:
         lat: Asset latitude.
         lon: Asset longitude.
         track: The storm track.
-        factor: The asset's terrain factor.
 
     Returns:
         tuple[NDArray[np.datetime64], FloatArray]: Times and wind in knots, both shaped ``(n_dense_fixes,)``.
     """
     dense = track.densify()
     distance, _ = geodesics(np.array([lat]), np.array([lon]), dense.lat, dense.lon)
-    return dense.times, holland_wind(distance, dense.vmax_kt, dense.rmw_km)[0] * factor
+    return dense.times, holland_wind(distance, dense.vmax_kt, dense.rmw_km)[0]
 
 
 def track_position(track: Track, when: datetime) -> dict[str, float] | None:
@@ -301,9 +243,7 @@ def track_position(track: Track, when: datetime) -> dict[str, float] | None:
     }
 
 
-def wind_at(
-    lat: FloatArray, lon: FloatArray, track: Track, when: datetime, factor: FloatArray | float = 1.0
-) -> FloatArray:
+def wind_at(lat: FloatArray, lon: FloatArray, track: Track, when: datetime) -> FloatArray:
     """Modelled wind at every asset at an arbitrary moment.
 
     Args:
@@ -311,7 +251,6 @@ def wind_at(
         lon: Asset longitudes, shape ``(n_assets,)``.
         track: The storm track.
         when: Moment to evaluate (timezone-aware or naive UTC).
-        factor: Terrain factor per asset, or one value for all.
 
     Returns:
         FloatArray: Wind in knots per asset; zeros when ``when`` is outside the track's time span.
@@ -320,8 +259,7 @@ def wind_at(
     if centre is None:
         return np.zeros(lat.size)
     distance, _ = geodesics(lat, lon, np.array([centre["lat"]]), np.array([centre["lon"]]))
-    wind = holland_wind(distance, np.array([centre["vmax_kt"]]), np.array([centre["rmw_km"]]))[:, 0]
-    return np.nan_to_num(wind * factor)
+    return np.nan_to_num(holland_wind(distance, np.array([centre["vmax_kt"]]), np.array([centre["rmw_km"]]))[:, 0])
 
 
 def radii_to_km(radii_nm: list[float | None]) -> list[float | None]:

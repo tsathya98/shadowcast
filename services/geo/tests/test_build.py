@@ -13,7 +13,6 @@ from shadowcast_geo.artifacts import LocalArtifacts
 from shadowcast_geo.calibration import OutageModel
 from shadowcast_geo.config import SCENARIOS, Settings
 from shadowcast_geo.ensemble import StormForecast
-from shadowcast_geo.hazard import decay_inland
 from tests.conftest import make_fixes
 
 SUBSTATION_LONS = [86.02, 86.05, 86.1, 86.2, 86.4, 86.8, 87.2, 87.6]
@@ -50,7 +49,7 @@ def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> LocalArtifacts:
         return frame
 
     def enrich(points: pd.DataFrame) -> pd.DataFrame:
-        return points.assign(population=1500.0, elevation_m=4.0, roughness_m=0.0002)  # open sea: factor 1
+        return points.assign(population=1500.0, elevation_m=4.0)
 
     def initialize(project: str) -> None:
         assert project == "argmax-cyclone-2026"
@@ -111,10 +110,7 @@ def test_build_output_satisfies_api_schemas(pipeline: LocalArtifacts) -> None:
     backtest = pipeline.read_json("scenarios/fani-2019/backtest.json")
     assert len(backtest["substations"]) == 8
     fani_start = SCENARIOS["fani-2019"].landfall - timedelta(hours=9)
-    fani = SCENARIOS["fani-2019"]
-    assert pipeline.read_json("scenarios/fani-2019/track.json") == decay_inland(
-        make_fixes(start=fani_start), fani.landfall
-    )
+    assert pipeline.read_json("scenarios/fani-2019/track.json") == make_fixes(start=fani_start)
 
 
 def test_main_rebuilds_one_scenario_with_stored_model(pipeline: LocalArtifacts) -> None:

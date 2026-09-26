@@ -26,7 +26,6 @@ NIGHT_LIGHTS_QUALITY_BAND = "Mandatory_Quality_Flag"  # 0/1 = high-quality retri
 POPULATION = "WorldPop/GP/100m/pop"
 POPULATION_YEAR = 2020
 ELEVATION = "COPERNICUS/DEM/GLO30_2024_1"
-LAND_COVER = "ESA/WorldCover/v200"
 
 # Physical and modelling constants.
 EARTH_RADIUS_KM = 6371.0
@@ -44,30 +43,6 @@ OUTAGE_LOSS_PCT = 50.0  # an asset "lost power" when its night-light radiance fe
 HOLDOUT_FOLDS = 5  # spatial cross-validation blocks along the reference coast
 LOW_LYING_M = 5.0
 LOSS_BANDS_KT = (0, 60, 80, 100, 130)
-
-# Surface roughness: the parametric wind is an over-water wind; rough land slows the 10 m wind. Roughness length (m)
-# per ESA WorldCover class, following Wieringa (1993) terrain classes, averaged (in log space) over the upwind fetch.
-ROUGHNESS_M: dict[int, float] = {
-    10: 0.8,  # tree cover
-    20: 0.1,  # shrubland
-    30: 0.03,  # grassland
-    40: 0.05,  # cropland
-    50: 0.5,  # built-up
-    60: 0.005,  # bare / sparse vegetation
-    70: 0.001,  # snow and ice
-    80: 0.0002,  # permanent water
-    90: 0.03,  # herbaceous wetland
-    95: 0.8,  # mangroves
-    100: 0.03,  # moss and lichen
-}
-ROUGHNESS_RADIUS_M = 1000
-Z0_SEA_M = 0.0002
-Z0_OPEN_M = 0.03  # open terrain, used where land cover is missing
-
-# Kaplan & DeMaria (1995) inland decay: V(t) = Vb + (R * V0 - Vb) * exp(-alpha * t), t in hours after landfall.
-DECAY_BACKGROUND_KT = 26.7
-DECAY_ALPHA_PER_H = 0.095
-DECAY_LANDFALL_REDUCTION = 0.9
 
 # Relative consequence of losing an asset (1-5), used to turn outage probability into a priority score.
 CRITICALITY: dict[str, int] = {
@@ -203,7 +178,7 @@ SCENARIOS: dict[str, Scenario] = {
         ),
         # Held-out strong storm in a different state and grid; it predates ECMWF open data, so there is no as-issued
         # forecast replay. Both night-light windows fall inside India's COVID-19 lockdown.
-        # Untouched test storm: added after the physics changes were fixed and scored exactly once.
+        # Untouched test storm, scored once with the Fani-fitted model.
         Scenario(
             id="hudhud-2014",
             storm="HUDHUD",
