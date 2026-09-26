@@ -2,6 +2,7 @@
 
 import { clsx } from "clsx";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
 
 import { AssetDetail } from "@/components/asset-detail";
@@ -114,7 +115,8 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   return (
     <div className="grid h-dvh grid-rows-[auto_1fr_auto] bg-[var(--surface-0)] text-[var(--text-primary)]">
       <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-white/10 bg-[var(--surface-1)] px-4 py-3">
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-center gap-2">
+          <Image src="/logo.svg" alt="" width={28} height={28} priority />
           <span className="text-lg font-semibold tracking-tight">ShadowCast</span>
           <span className="hidden text-xs text-[var(--text-muted)] md:inline">
             see the storm&apos;s shadow before it falls
