@@ -13,20 +13,21 @@ Built for **Build with AI: Code for Communities, Second Edition**, Track 5 *(Tra
 | Step | What happens |
 |---|---|
 | **Predict** | The as-issued forecast track becomes a wind/rain/surge hazard at every asset (parametric wind field, WeatherNext 2 ensemble, GPM rainfall, coastal elevation) |
-| **Prioritise** | Assets are ranked by calibrated outage probability × criticality × population served, and every rank comes with its reasons |
+| **Prioritise** | Assets are ranked by calibrated outage probability × criticality (population served breaks ties), and every rank comes with its reasons |
 | **Prepare** | Gemini drafts actions and a multilingual CAP 1.2 advisory with audio. **Nothing is dispatched without an officer's approval**, and every decision is audited |
-| **Prove** | Night-light (VIIRS) blackouts and Sentinel-1 flooding are measured per asset after landfall; historical backtests are published with error bars |
+| **Prove** | Night-light (VIIRS) blackouts and Sentinel-1 flooding are measured per asset after landfall; historical backtests are published with their skill metrics |
 
-**Evidence so far (Cyclone Fani, 2019):** across 263 substations from Ganjam to Balasore, modelled peak wind predicts observed night-light loss (Spearman 0.61). Substations above 100 kt lost a median **82 %** of their lights; those at or below 80 kt lost about **0 %**.
+**Evidence so far (Cyclone Fani, 2019):** across 200 lit substations from Ganjam to Balasore, the calibrated outage model separates substations that went dark from those that did not with ROC AUC **0.97** (Spearman 0.65 between modelled wind and light loss). Substations modelled above 100 kt lost a median **77 %** of their lights; those at or below 80 kt lost about **0 %**. The held-out weak storm Dana (2024) raised no false alarms; a strong held-out storm (Amphan, 2020) is next.
 
 ## Repository
 
 | Path | What |
 |---|---|
+| [`services/geo`](services/geo) | Hazard per asset, calibrated outage probability, ranking with reasons, satellite backtests; FastAPI on Cloud Run |
 | [`services/archiver`](services/archiver) | Cloud Run Job that snapshots GDACS, NDMA SACHET, IBTrACS and WeatherNext 2 every 6 h for as-issued replays |
 | [`infra`](infra) | Idempotent `gcloud` deployment scripts |
 
-Coming next: `services/geo` (hazard, ranking, backtest and verification API on Cloud Run) and `apps/web` (Next.js operations console with the Gemini agent, on Vercel).
+Coming next: as-issued ECMWF ensemble replays (probabilistic impact) and `apps/web` (Next.js operations console with the Gemini agent, on Vercel).
 
 ## Stack
 

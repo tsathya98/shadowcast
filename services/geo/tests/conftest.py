@@ -1,0 +1,70 @@
+"""Shared fixtures: a synthetic northbound cyclone, a small asset table and fast-retry settings."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import pytest
+
+from shadowcast_geo.calibration import OutageModel
+from shadowcast_geo.config import Settings
+from shadowcast_geo.hazard import Track
+
+START = datetime(2019, 5, 2, 12, tzinfo=UTC)
+
+
+def make_fixes(n: int = 7, lon: float = 86.0, vmax: float = 100.0) -> list[dict[str, Any]]:
+    """A storm moving due north along ``lon`` from 18N, one fix every 3 hours."""
+    return [
+        {
+            "time": (START + timedelta(hours=3 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "lat": 18.0 + 0.5 * i,
+            "lon": lon,
+            "vmax_kt": vmax,
+            "rmw_km": 30.0,
+            "r34_km": [200.0, 200.0, 200.0, 200.0],
+            "r50_km": [120.0, 120.0, 120.0, 120.0],
+            "r64_km": [60.0, None, 60.0, 60.0],
+        }
+        for i in range(n)
+    ]
+
+
+@pytest.fixture
+def fixes() -> list[dict[str, Any]]:
+    return make_fixes()
+
+
+@pytest.fixture
+def track(fixes: list[dict[str, Any]]) -> Track:
+    return Track.from_records(fixes)
+
+
+@pytest.fixture
+def settings(tmp_path: Path) -> Settings:
+    return Settings(
+        artifact_dir=tmp_path / "artifacts", cache_dir=tmp_path / "cache", max_attempts=2, retry_backoff_s=0.0
+    )
+
+
+@pytest.fixture
+def model() -> OutageModel:
+    return OutageModel(intercept=-12.8, slope=0.128, trained_on="fani-2019", n=200, auc=0.91, brier=0.09)
+
+
+@pytest.fixture
+def assets() -> pd.DataFrame:
+    """Four assets at increasing distance east of the synthetic track."""
+    return pd.DataFrame(
+        {
+            "asset_id": ["osm:node/1", "osm:node/2", "osdma:PURI:19.5,86.2", "osm:way/4"],
+            "kind": ["substation", "hospital", "cyclone_shelter", "school"],
+            "name": ["Near substation", "Mid hospital", "Shelter", None],
+            "source": ["OpenStreetMap", "OpenStreetMap", "OSDMA (MCS)", "OpenStreetMap"],
+            "lat": [19.5, 19.5, 19.5, 19.5],
+            "lon": [86.05, 86.4, 86.2, 88.5],
+        }
+    )

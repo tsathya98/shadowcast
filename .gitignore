@@ -8,8 +8,10 @@ __pycache__/
 coverage.xml
 htmlcov/
 
-# Local archive runs
+# Local archive runs and built geo artifacts / download cache
 archive/
+services/geo/artifacts/
+.cache/
 
 # Node / Next.js
 node_modules/
