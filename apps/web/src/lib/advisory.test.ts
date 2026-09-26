@@ -59,8 +59,11 @@ describe("toCapXml", () => {
 });
 
 describe("advisorySchema", () => {
-  it("accepts a valid advisory", () => {
+  it("accepts a valid advisory, in any supported language", () => {
     expect(advisorySchema.safeParse(advisory).success).toBe(true);
+    expect(advisorySchema.safeParse({ ...advisory, infos: [{ ...advisory.infos[0], language: "te" }] }).success).toBe(
+      true,
+    );
   });
 
   it.each([

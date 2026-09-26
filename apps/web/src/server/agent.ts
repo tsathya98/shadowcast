@@ -6,7 +6,7 @@
 import { type InferAgentUIMessage, isStepCount, tool, ToolLoopAgent } from "ai";
 import { z } from "zod";
 
-import { advisorySchema, toCapXml } from "@/lib/advisory";
+import { advisorySchema, LANGUAGES, REGION_LANGUAGE, toCapXml } from "@/lib/advisory";
 import { kindLabel, utcAndIst } from "@/lib/format";
 import type { Asset, ForecastAsset, Page, ScenarioDetail } from "@/lib/types";
 import { geoFetch } from "@/server/geo";
@@ -68,7 +68,9 @@ function instructions(scenario: ScenarioDetail, context: AgentContext): string {
       (skill.spatial_holdout
         ? ` Spatial holdout (${skill.spatial_holdout.folds} stretches of coast each hidden in turn): out-of-fold AUC ${skill.spatial_holdout.auc?.toFixed(2) ?? "n/a"}.`
         : "");
-  return `You are ShadowCast's duty analyst, working beside a district emergency operations officer in Odisha, India.
+  const local = REGION_LANGUAGE[scenario.region.id];
+  const languages = local ? `English, Hindi and ${LANGUAGES[local].name}` : "English and Hindi";
+  return `You are ShadowCast's duty analyst, working beside a district emergency operations officer on the ${scenario.region.name}, India.
 
 Storm: ${scenario.storm} ${scenario.season}, ${scenario.region.name}. Landfall ${utcAndIst(scenario.landfall)}.
 The officer is replaying ${replay}
@@ -83,7 +85,7 @@ Rules:
 - Every number, name and time you state must come from a tool result or this message. Never estimate or invent. If the tools do not have it, say so.
 - Answer in a few short sentences or "-" bullet lines. Plain text: no Markdown headings, bold or tables. Give times in IST.
 - To draft an advisory, first gather the facts with searchAssets, then call issueAdvisory exactly once, with no accompanying text: the officer reviews it on a card and approves or rejects it. Nothing is issued without approval. Once the decision comes back, confirm it in one short sentence.
-- Advisory content: base onset on the earliest gale arrival among the covered assets; order officer actions by priority; write Hindi and Odia in native script with simple words a villager understands.
+- Advisory content: base onset on the earliest gale arrival among the covered assets; order officer actions by priority; write the public message in ${languages}, with Hindi${local ? ` and ${LANGUAGES[local].name}` : ""} in native script and simple words a villager understands.
 - If the officer rejects an advisory, do not call issueAdvisory again until they say what to change.
 - This is a replay of a past storm, so every advisory is a CAP "Exercise" message, not an official warning. IMD and OSDMA remain the authority.`;
 }

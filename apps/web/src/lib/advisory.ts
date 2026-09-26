@@ -6,12 +6,21 @@
 import { z } from "zod";
 
 export const LANGUAGES = {
-  en: { cap: "en-IN", label: "English" },
-  hi: { cap: "hi-IN", label: "हिन्दी" },
-  or: { cap: "or-IN", label: "ଓଡ଼ିଆ" },
+  en: { cap: "en-IN", label: "English", name: "English" },
+  hi: { cap: "hi-IN", label: "हिन्दी", name: "Hindi" },
+  or: { cap: "or-IN", label: "ଓଡ଼ିଆ", name: "Odia" },
+  te: { cap: "te-IN", label: "తెలుగు", name: "Telugu" },
+  bn: { cap: "bn-IN", label: "বাংলা", name: "Bengali" },
 } as const;
 
 export type Language = keyof typeof LANGUAGES;
+
+/** The first language of the public in each study region; advisories go out in English, Hindi and this language. */
+export const REGION_LANGUAGE: Record<string, Language> = {
+  "odisha-coast": "or",
+  "north-andhra-coast": "te",
+  "west-bengal-coast": "bn",
+};
 
 const languageCodes = Object.keys(LANGUAGES) as [Language, ...Language[]];
 
@@ -46,7 +55,7 @@ export const advisorySchema = z.object({
     .min(1)
     .max(languageCodes.length)
     .refine((infos) => new Set(infos.map((info) => info.language)).size === infos.length, "one info per language")
-    .describe("The public message, once per language (native script for Hindi and Odia)"),
+    .describe("The public message, once per language (native script for Hindi and the local language)"),
 });
 
 export type Advisory = z.infer<typeof advisorySchema>;

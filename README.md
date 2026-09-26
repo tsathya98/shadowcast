@@ -19,7 +19,17 @@ Built for **Build with AI: Code for Communities, Second Edition**, Track 5 *(Tra
 | **Prepare** | Gemini drafts actions and a multilingual CAP 1.2 advisory with audio. **Nothing is dispatched without an officer's approval**, and every decision is audited |
 | **Prove** | Night-light (VIIRS) blackouts and Sentinel-1 flooding are measured per asset after landfall; historical backtests are published with their skill metrics |
 
-**Evidence so far (Cyclone Fani, 2019):** across 200 lit substations from Ganjam to Balasore, the calibrated outage model separates substations that went dark from those that did not with ROC AUC **0.97** (Spearman 0.65 between modelled wind and light loss). Substations modelled above 100 kt lost a median **77 %** of their lights; those at or below 80 kt lost about **0 %**. The held-out weak storm Dana (2024) raised no false alarms; a strong held-out storm (Amphan, 2020) is next.
+**Evidence.** The outage model is fitted once, on Cyclone Fani (2019), and then scored without refitting. Truth is NASA VIIRS night-light loss around each lit substation.
+
+| Storm | Test | ROC AUC | Brier | What it shows |
+|---|---|---|---|---|
+| Fani 2019, Odisha | In sample | 0.97 | 0.049 | Above 100 kt, substations lost a median 77 % of their lights; at or below 80 kt, about 0 % |
+| Fani 2019 | Spatial holdout (each fifth of the coast hidden in turn) | 0.97 | 0.050 | Within held-out stretches: 0.85–0.94. The model does not overfit the coast |
+| Hudhud 2014, Andhra Pradesh | Untouched test storm, another state and grid | **0.79** | 0.19 | Transfers to a direct strong hit on Visakhapatnam (Spearman 0.56) |
+| Amphan 2020, West Bengal | Held out | 0.44 | 0.28 | **Fails.** The wind model saturates over land and rural West Bengal lost power regardless of local wind |
+| Dana 2024, Odisha | Held out, weak storm | 0.32 | 0.02 | No false alarms. Only 5 of 252 substations went dark, too few for the AUC to mean anything |
+
+We tried adding inland decay (Kaplan & DeMaria 1995) and terrain roughness (ESA WorldCover). It made the Fani spatial holdout worse (0.87), so it was reverted; see the commit history. Amphan is published as it is: the Prove step exists to catch exactly this kind of miss before anyone relies on the model in a new grid.
 
 ## Repository
 

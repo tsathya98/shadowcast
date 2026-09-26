@@ -54,7 +54,7 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
           <div className="space-y-3 pt-1">
             <p className="text-sm text-[var(--text-secondary)]">
               Ask why an asset is at risk, or have Gemini draft an advisory with officer actions and a public message in
-              English, Hindi and Odia. Nothing is issued until you approve it.
+              English, Hindi and the local language. Nothing is issued until you approve it.
             </p>
             <div className="flex flex-col items-start gap-2">
               {suggestions.map((suggestion) => (

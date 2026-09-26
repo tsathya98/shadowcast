@@ -12,6 +12,7 @@ import { PreparePanel } from "@/components/prepare-panel";
 import { ReplayStrip } from "@/components/replay-strip";
 import { Timeline } from "@/components/timeline";
 import { useAssets, useForecastTracks, useHazard, useScenario, useTrack } from "@/lib/api";
+import { LANGUAGES, REGION_LANGUAGE } from "@/lib/advisory";
 import { type ColorBy, kindLabel, rgbCss, riskColor } from "@/lib/format";
 import type { ReplayMode, ScenarioSummary } from "@/lib/types";
 
@@ -102,6 +103,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
 
   const colorOptions: ColorBy[] = mode.kind === "forecast" ? ["gales", "risk"] : ["risk", "wind"];
   const forecastKey = mode.kind === "forecast" ? mode.key : null;
+  const local = scenario && REGION_LANGUAGE[scenario.region.id];
   const suggestions = [
     selected
       ? `Why is ${selected.name ?? kindLabel(selected.kind)} ranked #${selected.rank}?`
@@ -109,7 +111,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
     forecastKey
       ? "How far do the ensemble members agree, and what could still change?"
       : "How well did the model predict where the lights went out?",
-    "Draft an advisory for the five highest-priority assets in English, Hindi and Odia",
+    `Draft an advisory for the five highest-priority assets in English, Hindi${local ? ` and ${LANGUAGES[local].name}` : ""}`,
   ];
 
   return (
