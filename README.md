@@ -23,14 +23,16 @@ Built for **Build with AI: Code for Communities, Second Edition**, Track 5 *(Tra
 
 | Path | What |
 |---|---|
-| [`apps/web`](apps/web) | Operations console: Google Maps + deck.gl, timeline replay, ensemble spaghetti, ranked assets with reasons, backtest; Next.js 16 on Vercel |
+| [`apps/web`](apps/web) | Operations console: Google Maps + deck.gl, timeline replay, ensemble spaghetti, ranked assets with reasons, the Gemini duty analyst, backtest; Next.js 16 on Vercel |
 | [`services/geo`](services/geo) | Hazard per asset, calibrated outage probability, ranking with reasons, satellite backtests; FastAPI on Cloud Run |
 | [`services/archiver`](services/archiver) | Cloud Run Job that snapshots GDACS, NDMA SACHET, IBTrACS and WeatherNext 2 every 6 h for as-issued replays |
-| [`infra`](infra) | Idempotent `gcloud` deployment scripts |
+| [`infra`](infra) | Idempotent `gcloud` deployment scripts (geo API, archiver, agent resources) |
 
 **As-issued forecast replay:** ShadowCast replays ECMWF's 52-member ensemble as it was issued, 68 to 20 hours before landfall. Every member drives the same wind model, so each asset gets the probability of gales and hurricane-force wind, and when gales arrive. For Cyclone Dana (2024) at 44 h lead, 94-96 % of members put gales on Paradip's hospitals and Mahakalapada's shelters about 15 h before landfall.
 
-Coming next: the Gemini agent in the console (explanations, CAP 1.2 advisories in Odia/Hindi/English with audio, officer approval) and Vercel deployment.
+**The Gemini duty analyst:** an agent on Gemini 3.8 Flash (Vertex AI) answers questions such as *"why is this hospital ranked #3?"* by calling the geo API, so every number it quotes comes from ShadowCast's deterministic model, never from Gemini itself. It drafts advisories: officer actions per asset plus a public CAP 1.2 message in English, Hindi and Odia, validated against a schema. The officer approves or rejects each draft (approvals are HMAC-signed so they cannot be forged), and every decision is written once to an append-only Firestore audit log. Approved advisories can be downloaded as CAP XML and heard in each language through Gemini-TTS; classic Cloud Text-to-Speech has no Odia voice.
+
+Coming next: Vercel deployment and the Amphan (2020) out-of-sample backtest.
 
 ## Stack
 

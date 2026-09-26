@@ -7,10 +7,11 @@ import { useCallback, useMemo, useState } from "react";
 import { AssetDetail } from "@/components/asset-detail";
 import { AssetList } from "@/components/asset-list";
 import { BacktestPanel } from "@/components/backtest-panel";
+import { PreparePanel } from "@/components/prepare-panel";
 import { ReplayStrip } from "@/components/replay-strip";
 import { Timeline } from "@/components/timeline";
 import { useAssets, useForecastTracks, useHazard, useScenario, useTrack } from "@/lib/api";
-import { type ColorBy, rgbCss, riskColor } from "@/lib/format";
+import { type ColorBy, kindLabel, rgbCss, riskColor } from "@/lib/format";
 import type { ReplayMode, ScenarioSummary } from "@/lib/types";
 
 // deck.gl and the Maps JS API need the browser: never render the map on the server.
@@ -34,7 +35,7 @@ interface ConsoleProps {
 export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   const [scenarioId, setScenarioId] = useState(scenarios[0].id);
   const [mode, setMode] = useState<ReplayMode>({ kind: "best-track" });
-  const [tab, setTab] = useState<"prioritise" | "prove">("prioritise");
+  const [tab, setTab] = useState<"prioritise" | "prepare" | "prove">("prioritise");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [colorBy, setColorBy] = useState<ColorBy>("risk");
   const [scrub, setScrub] = useState<{ scenarioId: string; ms: number } | null>(null);
@@ -80,9 +81,14 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
     setColorBy(next.kind === "forecast" ? "gales" : "risk");
     setSelectedId(null);
   };
+  // Selecting on the map opens the asset, except while talking to the analyst, where it sets "this asset".
   const select = useCallback((id: string | null) => {
     setSelectedId(id);
-    if (id) setTab("prioritise");
+    if (id) setTab((current) => (current === "prepare" ? current : "prioritise"));
+  }, []);
+  const openAsset = useCallback((id: string) => {
+    setSelectedId(id);
+    setTab("prioritise");
   }, []);
 
   if (scenarioError) {
@@ -94,6 +100,16 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   }
 
   const colorOptions: ColorBy[] = mode.kind === "forecast" ? ["gales", "risk"] : ["risk", "wind"];
+  const forecastKey = mode.kind === "forecast" ? mode.key : null;
+  const suggestions = [
+    selected
+      ? `Why is ${selected.name ?? kindLabel(selected.kind)} ranked #${selected.rank}?`
+      : "Which hospitals and cyclone shelters are most at risk?",
+    forecastKey
+      ? "How far do the ensemble members agree, and what could still change?"
+      : "How well did the model predict where the lights went out?",
+    "Draft an advisory for the five highest-priority assets in English, Hindi and Odia",
+  ];
 
   return (
     <div className="grid h-dvh grid-rows-[auto_1fr_auto] bg-[var(--surface-0)] text-[var(--text-primary)]">
@@ -181,7 +197,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
 
         <aside className="flex min-h-0 flex-col border-l border-white/10 bg-[var(--surface-1)]">
           <div className="flex gap-4 px-4 pt-3" role="tablist">
-            {(["prioritise", "prove"] as const).map((name) => (
+            {(["prioritise", "prepare", "prove"] as const).map((name) => (
               <button
                 key={name}
                 type="button"
@@ -199,7 +215,16 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
               </button>
             ))}
           </div>
-          <div className="flex min-h-0 flex-1 flex-col pt-3">
+          {/* Kept mounted while hidden so the conversation survives tab switches; a new replay starts a new one. */}
+          <div className={clsx("min-h-0 flex-1 flex-col pt-3", tab === "prepare" ? "flex" : "hidden")}>
+            <PreparePanel
+              key={`${scenarioId}:${forecastKey ?? "best-track"}`}
+              context={{ scenarioId, forecastKey, selectedAssetId: selectedId }}
+              suggestions={suggestions}
+              onSelectAsset={openAsset}
+            />
+          </div>
+          <div className={clsx("min-h-0 flex-1 flex-col pt-3", tab === "prepare" ? "hidden" : "flex")}>
             {tab === "prove" && scenario ? (
               <BacktestPanel scenario={scenario} />
             ) : selected ? (

@@ -1,13 +1,10 @@
 import { Console } from "@/components/console";
 import type { ScenarioSummary } from "@/lib/types";
-
-const GEO_API_URL = process.env.GEO_API_URL ?? "https://shadowcast-geo-489356738785.asia-south1.run.app";
+import { geoFetch } from "@/server/geo";
 
 async function loadScenarios(): Promise<ScenarioSummary[] | Error> {
   try {
-    const response = await fetch(`${GEO_API_URL}/scenarios`, { cache: "no-store" });
-    if (!response.ok) return new Error(`geo API responded ${response.status}`);
-    return (await response.json()) as ScenarioSummary[];
+    return await geoFetch<ScenarioSummary[]>("/scenarios");
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error));
   }
