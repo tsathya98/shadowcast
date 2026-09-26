@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from shadowcast_geo import build
 from shadowcast_geo.artifacts import LocalArtifacts
 from shadowcast_geo.calibration import OutageModel
 from shadowcast_geo.config import SCENARIOS, Settings
+from shadowcast_geo.ensemble import StormForecast
 from tests.conftest import make_fixes
 
 SUBSTATION_LONS = [86.02, 86.05, 86.1, 86.2, 86.4, 86.8, 87.2, 87.6]
@@ -33,8 +35,14 @@ def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> LocalArtifacts:
         loss = np.where(points["lon"] < 86.3, 85.0, 5.0)
         return pd.DataFrame({"ntl_pre": 5.0, "ntl_post": 5.0 * (1 - loss / 100), "loss_pct": loss}, index=points.index)
 
-    def best_track(*_: object) -> list[dict[str, Any]]:
-        return make_fixes()
+    def best_track(_client: object, _settings: object, storm: str, _season: int) -> list[dict[str, Any]]:
+        landfall = next(s.landfall for s in SCENARIOS.values() if s.storm == storm)
+        return make_fixes(start=landfall - timedelta(hours=9))
+
+    def ensemble(_client: object, _settings: object, issued: datetime) -> list[StormForecast]:
+        start = SCENARIOS["dana-2024"].landfall - timedelta(hours=9)
+        members = {m: make_fixes(lon=86.0 + 0.05 * m, vmax=60.0, start=start) for m in range(1, 5)}
+        return [StormForecast("70B", issued, members), StormForecast("99A", issued, {1: make_fixes(lon=70.0)})]
 
     def assets(*_: object) -> pd.DataFrame:
         return frame
@@ -47,6 +55,7 @@ def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> LocalArtifacts:
 
     monkeypatch.setattr(build, "load_best_track", best_track)
     monkeypatch.setattr(build, "load_assets", assets)
+    monkeypatch.setattr(build, "load_ensemble", ensemble)
     monkeypatch.setattr(build.earth, "initialize", initialize)
     monkeypatch.setattr(build.earth, "enrich", enrich)
     monkeypatch.setattr(build.earth, "nightlight_loss", nightlights)
@@ -68,13 +77,25 @@ def test_main_builds_every_scenario(pipeline: LocalArtifacts) -> None:
     assert fani["asset_counts"] == {"substation": 8, "cyclone_shelter": 1}
     dana = pipeline.read_json("scenarios/dana-2024/scenario.json")
     assert dana["skill"]["out_of_sample"] is True
+    assert fani["forecasts"] == []
+    assert [f["key"] for f in dana["forecasts"]] == [
+        "20241022T00Z", "20241022T12Z", "20241023T00Z", "20241023T12Z", "20241024T00Z"
+    ]  # fmt: skip
+    first = dana["forecasts"][0]
+    assert (first["storm_id"], first["members"], first["lead_h"]) == ("70B", 4, 68.0)
+    forecast_assets: list[dict[str, Any]] = pipeline.read_json("scenarios/dana-2024/forecasts/20241022T00Z/assets.json")
+    assert {"p34", "p64", "wind_p10", "wind_p90", "members", "gale_arrival"} <= set(forecast_assets[0])
+    assert forecast_assets[0]["members"] == 4
+    tracks = pipeline.read_json("scenarios/dana-2024/forecasts/20241022T00Z/tracks.json")
+    assert [t["member"] for t in tracks] == [1, 2, 3, 4]
     assets: list[dict[str, Any]] = pipeline.read_json("scenarios/fani-2019/assets.json")
     assert [a["rank"] for a in assets] == list(range(1, 10))
     assert assets[0]["peak_time"].endswith("Z")
     assert {a["kind"] for a in assets if a["observed_loss_pct"] is None} == {"cyclone_shelter"}
     backtest = pipeline.read_json("scenarios/fani-2019/backtest.json")
     assert len(backtest["substations"]) == 8
-    assert pipeline.read_json("scenarios/fani-2019/track.json") == make_fixes()
+    fani_start = SCENARIOS["fani-2019"].landfall - timedelta(hours=9)
+    assert pipeline.read_json("scenarios/fani-2019/track.json") == make_fixes(start=fani_start)
 
 
 def test_main_rebuilds_one_scenario_with_stored_model(pipeline: LocalArtifacts) -> None:
@@ -88,6 +109,19 @@ def test_main_rebuilds_one_scenario_with_stored_model(pipeline: LocalArtifacts) 
 def test_main_rejects_unknown_scenario(pipeline: LocalArtifacts) -> None:
     with pytest.raises(SystemExit):
         build.main(["atlantis-2030"])
+
+
+def test_forecasts_need_landfall_inside_best_track(
+    pipeline: LocalArtifacts, settings: Settings, model: OutageModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def track_from_2019(*_: object) -> list[dict[str, Any]]:
+        return make_fixes()  # 2019 track, 2024 landfall
+
+    monkeypatch.setattr(build, "load_best_track", track_from_2019)
+    pipeline.write_json(build.MODEL_PATH, {"model": model.to_dict(), "bands": []})
+
+    with httpx.Client() as client, pytest.raises(ValueError, match="landfall time is outside the best track"):
+        build.build_scenario(SCENARIOS["dana-2024"], client, settings, pipeline, model)
 
 
 def test_non_reference_scenario_requires_model(pipeline: LocalArtifacts, settings: Settings) -> None:

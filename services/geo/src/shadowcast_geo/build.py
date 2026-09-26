@@ -2,6 +2,8 @@
 
 For each scenario: storm track and assets → deterministic hazard → Earth Engine enrichment → night-light ground truth
 → outage model (fitted on the reference scenario, evaluated out of sample elsewhere) → ranking → JSON artifacts.
+Scenarios with ECMWF forecast issue times are also replayed as-issued: every ensemble member's hazard is aggregated
+into impact probabilities per asset.
 
 Usage: ``python -m shadowcast_geo.build [scenario-id ...]`` (default: every registered scenario, reference first).
 """
@@ -31,7 +33,8 @@ from shadowcast_geo.config import (
     Scenario,
     Settings,
 )
-from shadowcast_geo.hazard import Track, exposure
+from shadowcast_geo.ensemble import ensemble_impact, load_ensemble, select_storm
+from shadowcast_geo.hazard import Track, exposure, track_position
 from shadowcast_geo.inputs import load_assets, load_best_track
 from shadowcast_geo.ranking import rank_assets
 
@@ -39,7 +42,7 @@ logger = logging.getLogger("shadowcast_geo.build")
 
 MODEL_PATH = "models/outage.json"
 INDEX_PATH = "scenarios/index.json"
-TIME_COLUMNS = ("peak_time", "closest_time", "band_entry")
+TIME_COLUMNS = ("peak_time", "closest_time", "band_entry", "gale_arrival")
 ASSET_FIELDS = [
     "asset_id",
     "rank",
@@ -54,6 +57,7 @@ ASSET_FIELDS = [
     "closest_time",
     "band_kt",
     "band_entry",
+    "gale_arrival",
     "population",
     "elevation_m",
     "criticality",
@@ -62,12 +66,18 @@ ASSET_FIELDS = [
     "observed_loss_pct",
     "reasons",
 ]
+FORECAST_FIELDS = [*ASSET_FIELDS, "p34", "p64", "wind_p10", "wind_p90", "members"]
+STATIC_FIELDS = ["asset_id", "kind", "name", "source", "lat", "lon", "population", "elevation_m", "observed_loss_pct"]
 ROUNDING = {
     "peak_wind_kt": 1,
     "min_dist_km": 1,
     "population": 0,
     "elevation_m": 1,
     "p_outage": 4,
+    "p34": 3,
+    "p64": 3,
+    "wind_p10": 1,
+    "wind_p90": 1,
     "score": 4,
     "observed_loss_pct": 1,
     "ntl_pre": 3,
@@ -113,6 +123,64 @@ def frame_records(frame: pd.DataFrame, fields: list[str]) -> list[dict[str, Any]
             out[column] = stamps.dt.strftime("%Y-%m-%dT%H:%M:%SZ").where(stamps.notna(), None)
     out = out.round({k: v for k, v in ROUNDING.items() if k in out})
     return json_safe(out.to_dict("records"))
+
+
+def build_forecasts(
+    scenario: Scenario,
+    client: httpx.Client,
+    settings: Settings,
+    store: ArtifactStore,
+    *,
+    assets: pd.DataFrame,
+    model: OutageModel,
+    reference_bands: list[dict[str, float]],
+    target: tuple[float, float],
+) -> list[dict[str, Any]]:
+    """Replay each as-issued ECMWF ensemble forecast of a scenario and store its ranked, probabilistic assets.
+
+    Args:
+        scenario: Scenario whose ``forecasts`` lists the issue times.
+        client: HTTP client.
+        settings: Settings (cache, retries).
+        store: Artifact destination.
+        assets: Enriched assets (with ``observed_loss_pct`` where known).
+        model: Calibrated outage model applied per member.
+        reference_bands: Loss-by-wind-band summary quoted in the reasons.
+        target: ``(lat, lon)`` used to pick the right storm from each run (the observed landfall position).
+
+    Returns:
+        list[dict[str, Any]]: One summary per issue time, in issue order.
+    """
+    lat, lon = assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float)
+    static = assets[[column for column in STATIC_FIELDS if column in assets]]
+    summaries: list[dict[str, Any]] = []
+    for issued in scenario.forecasts:
+        storm = select_storm(load_ensemble(client, settings, issued), target)
+        impact = ensemble_impact(lat, lon, storm, model)
+        no_band_entry = pd.Series(pd.NaT, index=static.index, dtype="datetime64[s]")
+        frame = static.assign(**impact, band_kt=0, band_entry=no_band_entry, members=len(storm.members))
+        ranked = rank_assets(frame, model, scenario.landfall, reference_bands, issued)
+        key = issued.strftime("%Y%m%dT%HZ")
+        prefix = f"scenarios/{scenario.id}/forecasts/{key}"
+        store.write_json(f"{prefix}/assets.json", frame_records(ranked, FORECAST_FIELDS))
+        store.write_json(f"{prefix}/tracks.json", [{"member": m, "fixes": f} for m, f in storm.members.items()])
+        summaries.append(
+            json_safe(
+                {
+                    "key": key,
+                    "issued": issued.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "lead_h": (scenario.landfall - issued).total_seconds() / 3600,
+                    "storm_id": storm.storm_id,
+                    "members": len(storm.members),
+                    "assets_likely_gale": int((ranked["p34"] >= 0.5).sum()),
+                    "assets_likely_hurricane": int((ranked["p64"] >= 0.5).sum()),
+                    "max_p_outage": float(ranked["p_outage"].max()),
+                    "source": "ECMWF IFS ensemble tropical-cyclone tracks, as issued (open data, CC BY 4.0)",
+                }
+            )
+        )
+        logger.info("forecast %s %s: %s", scenario.id, key, summaries[-1])
+    return summaries
 
 
 def build_scenario(
@@ -162,6 +230,22 @@ def build_scenario(
     )
     ranked = rank_assets(assets, model, scenario.landfall, reference_bands)
     backtest = truth.merge(ranked[["asset_id", "name", "lat", "lon", "p_outage"]], on="asset_id")
+    forecasts: list[dict[str, Any]] = []
+    if scenario.forecasts:
+        landfall_at = track_position(track, scenario.landfall)
+        if landfall_at is None:
+            raise ValueError(f"{scenario.id}: landfall time is outside the best track")
+        target = (landfall_at["lat"], landfall_at["lon"])
+        forecasts = build_forecasts(
+            scenario,
+            client,
+            settings,
+            store,
+            assets=assets,
+            model=model,
+            reference_bands=reference_bands,
+            target=target,
+        )
 
     summary = json_safe(
         {
@@ -176,6 +260,7 @@ def build_scenario(
             "model": model.to_dict(),
             "skill": skill,
             "loss_by_band": bands,
+            "forecasts": forecasts,
             "built_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
     )

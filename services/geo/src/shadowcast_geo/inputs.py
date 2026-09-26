@@ -35,20 +35,22 @@ _OSDMA_SHELTERS = re.compile(r"var shelters1\s*=\s*(\[.*?\]);", re.DOTALL)
 
 
 def download(client: httpx.Client, settings: Settings, cache_name: str, urls: tuple[str, ...], **request: Any) -> bytes:
-    """Download a resource once, trying mirrors in order with retries, and cache it on disk.
+    """Download a resource once, trying alternative URLs in order with retries, and cache it on disk.
+
+    Transport errors and 429/5xx responses are retried with exponential backoff; a 404 moves straight to the next URL.
 
     Args:
         client: HTTP client.
         settings: Settings providing the cache directory and retry policy.
         cache_name: File name under the cache directory.
-        urls: Candidate URLs (mirrors) tried in order.
+        urls: Candidate URLs (mirrors or alternative names) tried in order.
         **request: Extra ``client.request`` arguments (``method``, ``params``, ``data``); ``method`` defaults to GET.
 
     Returns:
         bytes: The response body (from cache when present).
 
     Raises:
-        httpx.HTTPError: When every mirror fails on its final attempt.
+        httpx.HTTPError: When every URL fails (the last error is raised).
     """
     cached = settings.cache_dir / cache_name
     if cached.exists():
@@ -59,6 +61,9 @@ def download(client: httpx.Client, settings: Settings, cache_name: str, urls: tu
         for attempt in range(1, settings.max_attempts + 1):
             try:
                 response = client.request(method, url, **request)
+                if response.status_code == 404:  # not at this URL: try the next alternative without retrying
+                    error = httpx.HTTPStatusError("not found", request=response.request, response=response)
+                    break
                 if response.status_code not in RETRYABLE_STATUS:
                     body = response.raise_for_status().content
                     cached.parent.mkdir(parents=True, exist_ok=True)

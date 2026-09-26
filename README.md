@@ -27,7 +27,9 @@ Built for **Build with AI: Code for Communities, Second Edition**, Track 5 *(Tra
 | [`services/archiver`](services/archiver) | Cloud Run Job that snapshots GDACS, NDMA SACHET, IBTrACS and WeatherNext 2 every 6 h for as-issued replays |
 | [`infra`](infra) | Idempotent `gcloud` deployment scripts |
 
-Coming next: as-issued ECMWF ensemble replays (probabilistic impact) and `apps/web` (Next.js operations console with the Gemini agent, on Vercel).
+**As-issued forecast replay:** ShadowCast replays ECMWF's 52-member ensemble as it was issued, 68 to 20 hours before landfall. Every member drives the same wind model, so each asset gets the probability of gales and hurricane-force wind, and when gales arrive. For Cyclone Dana (2024) at 44 h lead, 94-96 % of members put gales on Paradip's hospitals and Mahakalapada's shelters about 15 h before landfall.
+
+Coming next: `apps/web`, the Next.js operations console with the Gemini agent, on Vercel.
 
 ## Stack
 

@@ -10,6 +10,7 @@ from shadowcast_geo.hazard import (
     holland_wind,
     radii_to_km,
     track_position,
+    willoughby_rmw_km,
     wind_at,
     wind_timeline,
 )
@@ -60,6 +61,8 @@ def test_exposure_near_mid_far_and_missing_intensity(track: Track) -> None:
     assert result["closest_time"][near] == np.datetime64("2019-05-02T21:00:00")
     assert result["band_entry"][mid] == np.datetime64("2019-05-02T18:45:00")
     assert np.isnat(result["band_entry"][far])
+    assert result["gale_arrival"][near] == result["gale_arrival"][mid] == track.times[0]  # gales from the first fix
+    assert np.isnat(result["gale_arrival"][far])
     assert result["min_dist_km"][near] == pytest.approx(5.2, abs=0.2)
 
     calm = Track.from_records(make_fixes(vmax=float("nan")))
@@ -114,6 +117,14 @@ def test_wind_at(track: Track) -> None:
     assert inside[0] > 90  # eyewall
     assert inside[1] < 20  # ~600 km away
     assert outside.tolist() == [0.0, 0.0]
+
+
+def test_willoughby_rmw_km() -> None:
+    rmw = willoughby_rmw_km(np.array([40.0, 100.0, 100.0]), np.array([20.0, 20.0, -20.0]))
+
+    assert rmw[0] == pytest.approx(46.4 * np.exp(-0.0155 * 40 / 1.943844 + 0.0169 * 20))
+    assert rmw[0] > rmw[1]  # stronger storms have tighter cores
+    assert rmw[1] == rmw[2]  # symmetric in latitude
 
 
 def test_radii_to_km() -> None:

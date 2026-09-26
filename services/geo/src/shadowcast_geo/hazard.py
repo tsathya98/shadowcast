@@ -13,7 +13,15 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from shadowcast_geo.config import DENSIFY_STEP_MINUTES, EARTH_RADIUS_KM, HOLLAND_B, NM_TO_KM, WIND_BANDS_KT
+from shadowcast_geo.config import (
+    DENSIFY_STEP_MINUTES,
+    EARTH_RADIUS_KM,
+    GALE_KT,
+    HOLLAND_B,
+    KT_PER_MS,
+    NM_TO_KM,
+    WIND_BANDS_KT,
+)
 
 FloatArray = NDArray[np.float64]
 QUADRANTS = ("NE", "SE", "SW", "NW")
@@ -137,6 +145,22 @@ def holland_wind(distance_km: FloatArray, vmax_kt: FloatArray, rmw_km: FloatArra
     return vmax_kt[None, :] * np.sqrt(x * np.exp(1.0 - x))
 
 
+def willoughby_rmw_km(vmax_kt: FloatArray, lat: FloatArray) -> FloatArray:
+    """Radius of maximum wind estimated from intensity and latitude (Willoughby, Darling & Rahn 2006, eq. 7a).
+
+    ``Rmax = 46.4 * exp(-0.0155 * Vmax + 0.0169 * |lat|)`` with ``Vmax`` in m/s and ``Rmax`` in km. Used for forecast
+    tracks (e.g. the ECMWF ensemble) that report position and intensity but not RMW.
+
+    Args:
+        vmax_kt: Maximum sustained wind in knots.
+        lat: Latitude of the storm centre in degrees.
+
+    Returns:
+        FloatArray: Radius of maximum wind in km.
+    """
+    return 46.4 * np.exp(-0.0155 * vmax_kt / KT_PER_MS + 0.0169 * np.abs(lat))
+
+
 def exposure(lat: FloatArray, lon: FloatArray, track: Track) -> dict[str, NDArray[Any]]:
     """Peak modelled wind, closest approach and first entry into each wind-radius band for every asset.
 
@@ -150,30 +174,35 @@ def exposure(lat: FloatArray, lon: FloatArray, track: Track) -> dict[str, NDArra
 
     Returns:
         dict[str, NDArray[Any]]: ``peak_wind_kt``, ``peak_time``, ``min_dist_km``, ``closest_time``, ``band_kt``
-        (strongest band entered, 0 if none) and ``band_entry`` (first time inside that band, NaT if none). Times are
-        resolved on the densified track (see :meth:`Track.densify`).
+        (strongest band entered, 0 if none), ``band_entry`` (first time inside that band) and ``gale_arrival`` (first
+        time the modelled wind reaches ``GALE_KT``); missing times are NaT. Times are resolved on the densified track
+        (see :meth:`Track.densify`).
     """
     track = track.densify()
     distance, bearing = geodesics(lat, lon, track.lat, track.lon)
     wind = holland_wind(distance, track.vmax_kt, track.rmw_km)
-    valid = ~np.isnan(wind).all(axis=1)
-    peak_index = np.where(valid, np.nanargmax(np.where(np.isnan(wind), -np.inf, wind), axis=1), 0)
+    filled = np.where(np.isnan(wind), -np.inf, wind)
+    valid = np.isfinite(filled).any(axis=1)
+    peak_index = filled.argmax(axis=1)
+    not_a_time = np.datetime64("NaT", "s")
+    gale = filled >= GALE_KT
     quadrant = (bearing // 90).astype(int)
     fix_index = np.arange(track.times.size)[None, :]
     band_kt = np.zeros(lat.size, dtype=int)
-    band_entry = np.full(lat.size, np.datetime64("NaT", "s"), dtype="datetime64[s]")
+    band_entry = np.full(lat.size, not_a_time, dtype="datetime64[s]")
     for band in WIND_BANDS_KT:  # weakest first, so stronger bands overwrite
         inside = distance <= track.radii_km[band][quadrant, fix_index]  # NaN radius compares False
         hit = inside.any(axis=1)
         band_kt[hit] = band
         band_entry[hit] = track.times[inside[hit].argmax(axis=1)]
     return {
-        "peak_wind_kt": np.where(valid, np.nanmax(np.where(np.isnan(wind), -np.inf, wind), axis=1), np.nan),
-        "peak_time": track.times[peak_index],
+        "peak_wind_kt": np.where(valid, filled.max(axis=1), np.nan),
+        "peak_time": np.where(valid, track.times[peak_index], not_a_time),
         "min_dist_km": distance.min(axis=1),
         "closest_time": track.times[distance.argmin(axis=1)],
         "band_kt": band_kt,
         "band_entry": band_entry,
+        "gale_arrival": np.where(gale.any(axis=1), track.times[gale.argmax(axis=1)], not_a_time),
     }
 
 

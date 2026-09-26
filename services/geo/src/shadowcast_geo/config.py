@@ -15,6 +15,9 @@ IBTRACS_NI_CSV = (
 )
 OVERPASS_URLS = ("https://overpass.kumi.systems/api/interpreter", "https://overpass-api.de/api/interpreter")
 OSDMA_SHELTERS_URL = "https://www.osdma.org/preparedness/multi-purpose-cyclone-flood-shelters/"
+# ECMWF open data mirrored on Google Cloud Storage; keeps full history from 2024 onwards.
+ECMWF_OPEN_DATA = "https://storage.googleapis.com/ecmwf-open-data"
+ECMWF_TRACK_STEPS = (360, 240)  # tropical-cyclone track files are named -360h- since 2026 and -240h- before
 
 # Earth Engine datasets.
 NIGHT_LIGHTS = "NASA/VIIRS/002/VNP46A2"
@@ -27,9 +30,12 @@ ELEVATION = "COPERNICUS/DEM/GLO30_2024_1"
 # Physical and modelling constants.
 EARTH_RADIUS_KM = 6371.0
 NM_TO_KM = 1.852
+KT_PER_MS = 1.943844
 HOLLAND_B = 1.5  # Holland (1980) profile shape parameter; 1.5 is the conventional mid-range value
 DENSIFY_STEP_MINUTES = 15  # hazard time step; 3-hourly best tracks miss the eyewall at near-track assets
 WIND_BANDS_KT = (34, 50, 64)
+GALE_KT = 34.0
+ENSEMBLE_MATCH_KM = 150.0  # a member "hits" the target when its track passes within this distance
 POPULATION_RADIUS_M = 2000
 NIGHT_LIGHTS_RADIUS_M = 1500
 LIT_RADIANCE = 1.0  # nW/cm2/sr; below this, percentage loss is dominated by noise
@@ -96,6 +102,7 @@ class Scenario:
         truth_pre: Inclusive start / exclusive end dates of the pre-storm night-light window.
         truth_post: Inclusive start / exclusive end dates of the post-landfall night-light window.
         reference: Whether the outage model is fitted on this scenario (exactly one scenario should be).
+        forecasts: ECMWF ensemble issue times (UTC) to replay as-issued; ECMWF open data exists from 2024 onwards.
     """
 
     id: str
@@ -106,6 +113,7 @@ class Scenario:
     truth_pre: tuple[date, date]
     truth_post: tuple[date, date]
     reference: bool = False
+    forecasts: tuple[datetime, ...] = ()
 
 
 ODISHA_COAST = Region(
@@ -148,6 +156,10 @@ SCENARIOS: dict[str, Scenario] = {
             landfall=datetime(2024, 10, 24, 20, 0, tzinfo=UTC),  # IMD: crossed near Bhitarkanika-Dhamra overnight
             truth_pre=(date(2024, 10, 10), date(2024, 10, 22)),
             truth_post=(date(2024, 10, 25), date(2024, 11, 1)),
+            forecasts=tuple(
+                datetime(2024, 10, day, hour, tzinfo=UTC)
+                for day, hour in ((22, 0), (22, 12), (23, 0), (23, 12), (24, 0))
+            ),
         ),
     )
 }

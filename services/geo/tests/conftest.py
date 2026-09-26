@@ -16,11 +16,11 @@ from shadowcast_geo.hazard import Track
 START = datetime(2019, 5, 2, 12, tzinfo=UTC)
 
 
-def make_fixes(n: int = 7, lon: float = 86.0, vmax: float = 100.0) -> list[dict[str, Any]]:
-    """A storm moving due north along ``lon`` from 18N, one fix every 3 hours."""
+def make_fixes(n: int = 7, lon: float = 86.0, vmax: float = 100.0, start: datetime = START) -> list[dict[str, Any]]:
+    """A storm moving due north along ``lon`` from 18N, one fix every 3 hours from ``start``."""
     return [
         {
-            "time": (START + timedelta(hours=3 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "time": (start + timedelta(hours=3 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "lat": 18.0 + 0.5 * i,
             "lon": lon,
             "vmax_kt": vmax,

@@ -1,4 +1,4 @@
-"""ShadowCast geo API: serves built scenarios and computes hazard on demand.
+"""ShadowCast geo API: serves built scenarios and forecast replays, and computes hazard on demand.
 
 All built artifacts are loaded into memory at startup (a few MB per scenario), so request handlers never block on
 storage; on-demand hazard is a small vectorised numpy computation.
@@ -6,17 +6,18 @@ storage; on-demand hazard is a small vectorised numpy computation.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from numpy.typing import NDArray
+from pydantic import BaseModel, Field
 
 from shadowcast_geo.artifacts import ArtifactStore, artifact_store
 from shadowcast_geo.config import Settings
@@ -25,12 +26,30 @@ from shadowcast_geo.models import (
     Asset,
     AssetDetail,
     AssetPage,
+    ForecastAsset,
+    ForecastAssetPage,
+    ForecastSummary,
     HazardSnapshot,
     ScenarioDetail,
     ScenarioSummary,
     StormPosition,
     TimelinePoint,
 )
+
+
+@dataclass(frozen=True)
+class LoadedForecast:
+    """An as-issued ensemble forecast replay held in memory.
+
+    Attributes:
+        summary: Forecast metadata.
+        assets: Assets in forecast rank order.
+        tracks: Member tracks (``member`` and ``fixes``).
+    """
+
+    summary: ForecastSummary
+    assets: list[ForecastAsset]
+    tracks: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -46,6 +65,7 @@ class LoadedScenario:
         lat: Asset latitudes in rank order.
         lon: Asset longitudes in rank order.
         backtest: Backtest artifact.
+        forecasts: Ensemble forecast replays keyed by forecast key.
     """
 
     detail: ScenarioDetail
@@ -56,10 +76,34 @@ class LoadedScenario:
     lat: NDArray[np.float64]
     lon: NDArray[np.float64]
     backtest: dict[str, Any]
+    forecasts: dict[str, LoadedForecast]
+
+
+class AssetQuery(BaseModel):
+    """Filters shared by the asset listing endpoints."""
+
+    kind: list[str] | None = Field(default=None, description="Filter by asset kind (repeatable)")
+    min_score: float = Field(default=0.0, ge=0, le=1, description="Minimum priority score")
+    limit: int = Field(default=100, ge=1, le=5000)
+    offset: int = Field(default=0, ge=0)
+
+
+def paginate[AssetT: Asset](items: Sequence[AssetT], query: AssetQuery) -> tuple[int, list[AssetT]]:
+    """Filter rank-ordered assets by kind and minimum score, then slice a page.
+
+    Args:
+        items: Assets in rank order.
+        query: Filters and paging.
+
+    Returns:
+        tuple[int, list[AssetT]]: Total matches and the requested page.
+    """
+    selected = [a for a in items if (not query.kind or a.kind in query.kind) and a.score >= query.min_score]
+    return len(selected), selected[query.offset : query.offset + query.limit]
 
 
 def load_scenarios(store: ArtifactStore) -> dict[str, LoadedScenario]:
-    """Load every scenario listed in the artifact index.
+    """Load every scenario listed in the artifact index, with its forecast replays.
 
     Args:
         store: Artifact store.
@@ -74,8 +118,20 @@ def load_scenarios(store: ArtifactStore) -> dict[str, LoadedScenario]:
         prefix = f"scenarios/{entry['id']}"
         fixes = store.read_json(f"{prefix}/track.json")
         assets = [Asset.model_validate(record) for record in store.read_json(f"{prefix}/assets.json")]
+        detail = ScenarioDetail.model_validate(store.read_json(f"{prefix}/scenario.json"))
+        forecasts = {
+            summary.key: LoadedForecast(
+                summary=summary,
+                assets=[
+                    ForecastAsset.model_validate(record)
+                    for record in store.read_json(f"{prefix}/forecasts/{summary.key}/assets.json")
+                ],
+                tracks=store.read_json(f"{prefix}/forecasts/{summary.key}/tracks.json"),
+            )
+            for summary in detail.forecasts
+        }
         loaded[entry["id"]] = LoadedScenario(
-            detail=ScenarioDetail.model_validate(store.read_json(f"{prefix}/scenario.json")),
+            detail=detail,
             fixes=fixes,
             track=Track.from_records(fixes),
             assets=assets,
@@ -83,8 +139,179 @@ def load_scenarios(store: ArtifactStore) -> dict[str, LoadedScenario]:
             lat=np.array([asset.lat for asset in assets]),
             lon=np.array([asset.lon for asset in assets]),
             backtest=store.read_json(f"{prefix}/backtest.json"),
+            forecasts=forecasts,
         )
     return loaded
+
+
+def loaded_scenarios(request: Request) -> dict[str, LoadedScenario]:
+    """Scenarios loaded at startup (dependency).
+
+    Args:
+        request: Current request.
+
+    Returns:
+        dict[str, LoadedScenario]: Scenarios keyed by id.
+    """
+    return cast("dict[str, LoadedScenario]", request.app.state.scenarios)
+
+
+def get_scenario(
+    scenario_id: str, scenarios: Annotated[dict[str, LoadedScenario], Depends(loaded_scenarios)]
+) -> LoadedScenario:
+    """Resolve the ``scenario_id`` path parameter (dependency).
+
+    Args:
+        scenario_id: Scenario id from the URL.
+        scenarios: Loaded scenarios.
+
+    Returns:
+        LoadedScenario: The scenario.
+
+    Raises:
+        HTTPException: 404 when the scenario is unknown.
+    """
+    if scenario_id not in scenarios:
+        raise HTTPException(status_code=404, detail=f"unknown scenario {scenario_id!r}")
+    return scenarios[scenario_id]
+
+
+ScenarioDep = Annotated[LoadedScenario, Depends(get_scenario)]
+
+
+def get_forecast(scenario: ScenarioDep, key: str) -> LoadedForecast:
+    """Resolve the ``key`` path parameter of a scenario's forecast replay (dependency).
+
+    Args:
+        scenario: Resolved scenario.
+        key: Forecast key from the URL, e.g. ``20241023T00Z``.
+
+    Returns:
+        LoadedForecast: The forecast replay.
+
+    Raises:
+        HTTPException: 404 when the forecast is unknown.
+    """
+    if key not in scenario.forecasts:
+        raise HTTPException(status_code=404, detail=f"unknown forecast {key!r} for {scenario.detail.id!r}")
+    return scenario.forecasts[key]
+
+
+ForecastDep = Annotated[LoadedForecast, Depends(get_forecast)]
+AssetQueryDep = Annotated[AssetQuery, Query()]
+router = APIRouter()
+
+
+@router.get("/health")
+async def health(scenarios: Annotated[dict[str, LoadedScenario], Depends(loaded_scenarios)]) -> dict[str, Any]:
+    """Liveness probe listing the scenarios loaded in memory."""
+    return {"status": "ok", "scenarios": sorted(scenarios)}
+
+
+@router.get("/scenarios")
+async def list_scenarios(
+    scenarios: Annotated[dict[str, LoadedScenario], Depends(loaded_scenarios)],
+) -> list[ScenarioSummary]:
+    """Every built scenario."""
+    return [ScenarioSummary.model_validate(s.detail.model_dump()) for s in scenarios.values()]
+
+
+@router.get("/scenarios/{scenario_id}")
+async def scenario_detail(scenario: ScenarioDep) -> ScenarioDetail:
+    """Scenario metadata, calibrated outage model, backtest skill and forecast replays."""
+    return scenario.detail
+
+
+@router.get("/scenarios/{scenario_id}/track")
+async def track_geojson(scenario: ScenarioDep) -> dict[str, Any]:
+    """Storm track as a GeoJSON FeatureCollection: the path as a LineString plus one Point per fix."""
+    line = {
+        "type": "Feature",
+        "geometry": {"type": "LineString", "coordinates": [[f["lon"], f["lat"]] for f in scenario.fixes]},
+        "properties": {"kind": "path"},
+    }
+    points = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [f["lon"], f["lat"]]},
+            "properties": {"kind": "fix", **{k: v for k, v in f.items() if k not in ("lat", "lon")}},
+        }
+        for f in scenario.fixes
+    ]
+    return {"type": "FeatureCollection", "features": [line, *points]}
+
+
+@router.get("/scenarios/{scenario_id}/assets")
+async def assets(scenario: ScenarioDep, query: AssetQueryDep) -> AssetPage:
+    """Assets in priority order (best-track replay), optionally filtered by kind and minimum score."""
+    total, items = paginate(scenario.assets, query)
+    return AssetPage(total=total, items=items)
+
+
+@router.get("/scenarios/{scenario_id}/assets/{asset_id:path}")
+async def asset_detail(scenario: ScenarioDep, asset_id: str) -> AssetDetail:
+    """One asset with its modelled wind through the storm's life (15-minute steps)."""
+    asset = scenario.by_id.get(asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"unknown asset {asset_id!r}")
+    times, winds = wind_timeline(asset.lat, asset.lon, scenario.track)
+    timeline = [
+        TimelinePoint(
+            time=f"{np.datetime_as_string(t, unit='s')}Z", wind_kt=None if np.isnan(w) else round(float(w), 1)
+        )
+        for t, w in zip(times, winds, strict=True)
+    ]
+    return AssetDetail(asset=asset, timeline=timeline)
+
+
+@router.get("/scenarios/{scenario_id}/hazard")
+async def hazard(scenario: ScenarioDep, at: Annotated[datetime, Query(description="ISO 8601 time")]) -> HazardSnapshot:
+    """Modelled wind at every asset (rank order) at one moment, plus the interpolated storm position."""
+    at_utc = at.astimezone(UTC) if at.tzinfo else at.replace(tzinfo=UTC)
+    position = track_position(scenario.track, at_utc)
+    return HazardSnapshot(
+        at=at_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        storm=StormPosition.model_validate(position) if position else None,
+        asset_ids=[a.asset_id for a in scenario.assets],
+        wind_kt=np.round(wind_at(scenario.lat, scenario.lon, scenario.track, at_utc), 1).tolist(),
+    )
+
+
+@router.get("/scenarios/{scenario_id}/backtest")
+async def backtest(scenario: ScenarioDep) -> dict[str, Any]:
+    """Predicted outage probability vs observed night-light loss per substation, with skill metrics."""
+    return scenario.backtest
+
+
+@router.get("/scenarios/{scenario_id}/forecasts")
+async def forecasts(scenario: ScenarioDep) -> list[ForecastSummary]:
+    """As-issued ECMWF ensemble forecasts replayed for this scenario, in issue order."""
+    return [forecast.summary for forecast in scenario.forecasts.values()]
+
+
+@router.get("/scenarios/{scenario_id}/forecasts/{key}/tracks")
+async def forecast_tracks(forecast: ForecastDep) -> dict[str, Any]:
+    """Ensemble member tracks as a GeoJSON FeatureCollection of LineStrings (the "spaghetti plot")."""
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": [[f["lon"], f["lat"]] for f in member["fixes"]]},
+            "properties": {
+                "member": member["member"],
+                "max_vmax_kt": max(f["vmax_kt"] for f in member["fixes"]),
+                "times": [f["time"] for f in member["fixes"]],
+            },
+        }
+        for member in forecast.tracks
+    ]
+    return {"type": "FeatureCollection", "features": features}
+
+
+@router.get("/scenarios/{scenario_id}/forecasts/{key}/assets")
+async def forecast_assets(forecast: ForecastDep, query: AssetQueryDep) -> ForecastAssetPage:
+    """Assets ranked under one ensemble forecast, with member-agreement probabilities and gale arrival."""
+    total, items = paginate(forecast.assets, query)
+    return ForecastAssetPage(total=total, items=items)
 
 
 def create_app(settings: Settings | None = None, store: ArtifactStore | None = None) -> FastAPI:
@@ -98,108 +325,19 @@ def create_app(settings: Settings | None = None, store: ArtifactStore | None = N
         FastAPI: The configured application.
     """
     settings = settings or Settings.from_env()
-    scenarios: dict[str, LoadedScenario] = {}
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
-        scenarios.update(load_scenarios(store or artifact_store(settings)))
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        app.state.scenarios = load_scenarios(store or artifact_store(settings))
         yield
 
     app = FastAPI(
         title="ShadowCast geo API",
-        version="0.1.0",
+        version="0.2.0",
         summary="Impact-based cyclone forecasting per asset, verified against satellite ground truth.",
         lifespan=lifespan,
     )
     app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins), allow_methods=["GET"])
-
-    def get(scenario_id: str) -> LoadedScenario:
-        if scenario_id not in scenarios:
-            raise HTTPException(status_code=404, detail=f"unknown scenario {scenario_id!r}")
-        return scenarios[scenario_id]
-
-    @app.get("/health")
-    async def health() -> dict[str, Any]:
-        """Liveness probe listing the scenarios loaded in memory."""
-        return {"status": "ok", "scenarios": sorted(scenarios)}
-
-    @app.get("/scenarios")
-    async def list_scenarios() -> list[ScenarioSummary]:
-        """Every built scenario."""
-        return [ScenarioSummary.model_validate(s.detail.model_dump()) for s in scenarios.values()]
-
-    @app.get("/scenarios/{scenario_id}")
-    async def scenario_detail(scenario_id: str) -> ScenarioDetail:
-        """Scenario metadata, calibrated outage model and backtest skill."""
-        return get(scenario_id).detail
-
-    @app.get("/scenarios/{scenario_id}/track")
-    async def track_geojson(scenario_id: str) -> dict[str, Any]:
-        """Storm track as a GeoJSON FeatureCollection: the path as a LineString plus one Point per fix."""
-        fixes = get(scenario_id).fixes
-        line = {
-            "type": "Feature",
-            "geometry": {"type": "LineString", "coordinates": [[f["lon"], f["lat"]] for f in fixes]},
-            "properties": {"kind": "path"},
-        }
-        points = [
-            {
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [f["lon"], f["lat"]]},
-                "properties": {"kind": "fix", **{k: v for k, v in f.items() if k not in ("lat", "lon")}},
-            }
-            for f in fixes
-        ]
-        return {"type": "FeatureCollection", "features": [line, *points]}
-
-    @app.get("/scenarios/{scenario_id}/assets")
-    async def assets(
-        scenario_id: str,
-        kind: Annotated[list[str] | None, Query(description="Filter by asset kind (repeatable)")] = None,
-        min_score: Annotated[float, Query(ge=0, le=1)] = 0.0,
-        limit: Annotated[int, Query(ge=1, le=5000)] = 100,
-        offset: Annotated[int, Query(ge=0)] = 0,
-    ) -> AssetPage:
-        """Assets in priority order, optionally filtered by kind and minimum score."""
-        selected = [a for a in get(scenario_id).assets if (not kind or a.kind in kind) and a.score >= min_score]
-        return AssetPage(total=len(selected), items=selected[offset : offset + limit])
-
-    @app.get("/scenarios/{scenario_id}/assets/{asset_id:path}")
-    async def asset_detail(scenario_id: str, asset_id: str) -> AssetDetail:
-        """One asset with its modelled wind through the storm's life (15-minute steps)."""
-        scenario = get(scenario_id)
-        asset = scenario.by_id.get(asset_id)
-        if asset is None:
-            raise HTTPException(status_code=404, detail=f"unknown asset {asset_id!r}")
-        times, winds = wind_timeline(asset.lat, asset.lon, scenario.track)
-        timeline = [
-            TimelinePoint(
-                time=f"{np.datetime_as_string(t, unit='s')}Z", wind_kt=None if np.isnan(w) else round(float(w), 1)
-            )
-            for t, w in zip(times, winds, strict=True)
-        ]
-        return AssetDetail(asset=asset, timeline=timeline)
-
-    @app.get("/scenarios/{scenario_id}/hazard")
-    async def hazard(
-        scenario_id: str, at: Annotated[datetime, Query(description="ISO 8601 time (UTC)")]
-    ) -> HazardSnapshot:
-        """Modelled wind at every asset (rank order) at one moment, plus the interpolated storm position."""
-        scenario = get(scenario_id)
-        at_utc = at.astimezone(UTC) if at.tzinfo else at.replace(tzinfo=UTC)
-        position = track_position(scenario.track, at_utc)
-        winds = wind_at(scenario.lat, scenario.lon, scenario.track, at_utc)
-        return HazardSnapshot(
-            at=at_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            storm=StormPosition.model_validate(position) if position else None,
-            asset_ids=[a.asset_id for a in scenario.assets],
-            wind_kt=np.round(winds, 1).tolist(),
-        )
-
-    @app.get("/scenarios/{scenario_id}/backtest")
-    async def backtest(scenario_id: str) -> dict[str, Any]:
-        """Predicted outage probability vs observed night-light loss per substation, with skill metrics."""
-        return get(scenario_id).backtest
-
+    app.include_router(router)
     return app

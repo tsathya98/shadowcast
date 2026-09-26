@@ -7,7 +7,11 @@ from shadowcast_geo.calibration import OutageModel
 from shadowcast_geo.ranking import rank_assets
 
 LANDFALL = datetime(2019, 5, 3, 3, 30, tzinfo=UTC)
-BANDS = [{"low_kt": 100.0, "high_kt": 130.0, "n": 36.0, "p25": 70.0, "median": 82.0, "p75": 90.0}]
+BANDS = [
+    {"low_kt": 0.0, "high_kt": 60.0, "n": 47.0, "p25": -15.0, "median": -9.0, "p75": -3.0},
+    {"low_kt": 100.0, "high_kt": 130.0, "n": 36.0, "p25": 70.0, "median": 82.0, "p75": 90.0},
+]
+ISSUED = datetime(2019, 5, 1, 12, tzinfo=UTC)
 
 
 def _frame(**overrides: list[object]) -> pd.DataFrame:
@@ -59,3 +63,37 @@ def test_rank_without_population_or_band_match(model: OutageModel) -> None:
     assert len(ranked) == 4
     assert not any("lost a median" in r for reasons in ranked["reasons"] for r in reasons)
     assert not any("people live" in r for reasons in ranked["reasons"] for r in reasons)
+
+
+def test_ensemble_forecast_ranking_and_reasons(model: OutageModel) -> None:
+    frame = _frame(
+        kind=["school", "cyclone_shelter", "cyclone_shelter", "school"],
+        peak_wind_kt=[45.0, 45.0, 45.0, 45.0],
+        band_kt=[0, 0, 0, 0],
+        band_entry=[pd.NaT] * 4,
+        peak_time=[pd.Timestamp("2019-05-03T03:00:00"), pd.NaT, pd.NaT, pd.NaT],
+        population=[1.0, 10.0, 5.0, 1.0],
+    ).assign(
+        p_outage=[3e-7, 1e-7, 2e-7, 0.0],  # negligible: must not override gale exposure
+        p34=[0.9, 0.2, 0.8, 0.0],
+        p64=[0.0, 0.0, 0.0, 0.0],
+        wind_p10=[30.0] * 4,
+        wind_p90=[55.0] * 4,
+        members=[52] * 4,
+        gale_arrival=np.array(["2019-05-02T21:00:00", "NaT", "NaT", "NaT"], dtype="datetime64[s]"),
+    )
+
+    ranked = rank_assets(frame, model, LANDFALL, BANDS, issued=ISSUED)
+
+    # No outage risk anywhere: gale exposure x criticality decides, not population alone.
+    assert ranked["asset_id"].tolist() == ["c", "a", "b", "d"]
+    assert (ranked["p_outage"] < 1e-6).all()
+    school = dict(zip(ranked["asset_id"], ranked["reasons"], strict=True))["a"]
+    assert school[0] == (
+        "Ensemble median peak wind 45 kt (10-90%: 30-55 kt) around 03 May 03:00 UTC; median closest approach 20 km"
+    )
+    assert school[1] == "0 of 52 ECMWF members bring hurricane-force (64 kt) wind; 47 bring gales (34 kt)"
+    assert school[3] == "In the fani-2019 backtest, assets modelled at 0-60 kt showed no systematic night-light loss"
+    assert "Gales (34 kt) arrive from 02 May 21:00 UTC (33 h after this forecast, +6 h to landfall)" in school
+    shelter = dict(zip(ranked["asset_id"], ranked["reasons"], strict=True))["c"]
+    assert "around" not in shelter[0]  # no peak time known

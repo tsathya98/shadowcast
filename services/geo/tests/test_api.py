@@ -32,6 +32,9 @@ def store(tmp_path: Path) -> LocalArtifacts:
         **summary, "track_source": "IBTrACS best track", "asset_counts": {"hospital": 1, "school": 1},
         "model": {"intercept": -12.8, "slope": 0.128}, "skill": {"auc": 0.91, "out_of_sample": False},
         "loss_by_band": [{"low_kt": 100.0, "high_kt": 130.0, "n": 36.0, "median": 82.0}],
+        "forecasts": [{"key": "20190501T12Z", "issued": "2019-05-01T12:00:00Z", "lead_h": 39.5, "storm_id": "01B",
+                       "members": 52, "assets_likely_gale": 1, "assets_likely_hurricane": 0, "max_p_outage": 0.4,
+                       "source": "ECMWF IFS ensemble"}],
         "built_at": "2026-09-26T00:00:00Z",
     })  # fmt: skip
     artifacts.write_json("scenarios/fani-2019/track.json", make_fixes())
@@ -39,6 +42,13 @@ def store(tmp_path: Path) -> LocalArtifacts:
         _asset("osm:node/1", 1, "hospital", 0.9, 86.05), _asset("osm:way/2", 2, "school", 0.36, 86.4)
     ])  # fmt: skip
     artifacts.write_json("scenarios/fani-2019/backtest.json", {"skill": {"auc": 0.91}, "substations": []})
+    forecast_asset = {**_asset("osm:node/1", 1, "hospital", 0.4, 86.05), "p34": 0.9, "p64": 0.25, "wind_p10": 40.0,
+                      "wind_p90": 80.0, "members": 52, "gale_arrival": "2019-05-02T18:00:00Z"}  # fmt: skip
+    artifacts.write_json("scenarios/fani-2019/forecasts/20190501T12Z/assets.json", [forecast_asset])
+    artifacts.write_json(
+        "scenarios/fani-2019/forecasts/20190501T12Z/tracks.json",
+        [{"member": 1, "fixes": make_fixes()}, {"member": 2, "fixes": make_fixes(lon=86.5, vmax=80.0)}],
+    )
     return artifacts
 
 
@@ -134,3 +144,28 @@ def test_empty_store_serves_no_scenarios(tmp_path: Path) -> None:
     with TestClient(create_app(Settings(), LocalArtifacts(tmp_path))) as empty:
         assert empty.get("/health").json() == {"status": "ok", "scenarios": []}
         assert empty.get("/scenarios").json() == []
+
+
+def test_forecast_replay_endpoints(client: TestClient) -> None:
+    listing = client.get("/scenarios/fani-2019/forecasts").json()
+    assert [(f["key"], f["lead_h"], f["members"]) for f in listing] == [("20190501T12Z", 39.5, 52)]
+
+    tracks = client.get("/scenarios/fani-2019/forecasts/20190501T12Z/tracks").json()["features"]
+    assert [t["properties"]["member"] for t in tracks] == [1, 2]
+    assert tracks[1]["properties"]["max_vmax_kt"] == 80.0
+    assert len(tracks[0]["geometry"]["coordinates"]) == len(tracks[0]["properties"]["times"]) == 7
+
+    page = client.get("/scenarios/fani-2019/forecasts/20190501T12Z/assets", params={"kind": "hospital"}).json()
+    assert page["total"] == 1
+    assert page["items"][0]["p64"] == 0.25
+    assert page["items"][0]["gale_arrival"] == "2019-05-02T18:00:00Z"
+    assert client.get("/scenarios/fani-2019/forecasts/20190501T12Z/assets?kind=school").json()["total"] == 0
+
+
+@pytest.mark.parametrize("path", ["/scenarios/fani-2019/forecasts/19000101T00Z/tracks", "/scenarios/nope/forecasts"])
+def test_forecast_not_found(client: TestClient, path: str) -> None:
+    assert client.get(path).status_code == 404
+
+
+def test_invalid_query_is_rejected(client: TestClient) -> None:
+    assert client.get("/scenarios/fani-2019/assets?limit=0").status_code == 422

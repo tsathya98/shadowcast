@@ -38,7 +38,19 @@ def test_download_falls_back_to_next_mirror(
     assert mirror_b.calls.last.request.content == b"q=1"
 
 
-@pytest.mark.parametrize(("status", "error"), [(502, httpx.HTTPStatusError), (400, httpx.HTTPStatusError)])
+def test_download_skips_missing_url_without_retrying(
+    client: httpx.Client, settings: Settings, respx_mock: respx.MockRouter
+) -> None:
+    missing = respx_mock.get(MIRRORS[0]).mock(return_value=httpx.Response(404))
+    respx_mock.get(MIRRORS[1]).mock(return_value=httpx.Response(200, content=b"renamed"))
+
+    assert download(client, settings, "w.bin", MIRRORS) == b"renamed"
+    assert missing.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "error"), [(502, httpx.HTTPStatusError), (400, httpx.HTTPStatusError), (404, httpx.HTTPStatusError)]
+)
 def test_download_raises_after_all_attempts(
     client: httpx.Client, settings: Settings, respx_mock: respx.MockRouter, status: int, error: type[Exception]
 ) -> None:
