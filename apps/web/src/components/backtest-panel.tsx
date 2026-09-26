@@ -1,0 +1,145 @@
+"use client";
+
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Scatter,
+  ScatterChart,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+
+import { useBacktest } from "@/lib/api";
+import { percent } from "@/lib/format";
+import type { ScenarioDetail } from "@/lib/types";
+
+const TOOLTIP_STYLE = {
+  background: "var(--surface-2)",
+  border: "1px solid rgb(255 255 255 / 0.1)",
+  borderRadius: 8,
+  fontSize: 12,
+};
+const AXIS_TICK = { fontSize: 10, fill: "var(--text-muted)" };
+
+function Tile({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="rounded-lg bg-white/5 px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{label}</div>
+      <div className="font-mono text-xl tabular-nums text-[var(--text-primary)]">{value}</div>
+      <div className="text-[11px] text-[var(--text-secondary)]">{hint}</div>
+    </div>
+  );
+}
+
+/** "Prove": how well modelled wind predicted observed night-light loss after landfall. */
+export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
+  const { data } = useBacktest(scenario.id);
+  const { skill } = scenario;
+  const lit = (data?.substations ?? []).filter((s) => s.lit && s.loss_pct != null && s.peak_wind_kt != null);
+  const bands = scenario.loss_by_band.map((b) => ({
+    band: `${b.low_kt}–${b.high_kt}`,
+    median: Math.max(0, b.median),
+    raw: b.median,
+    n: b.n,
+  }));
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+      <p className="text-sm text-[var(--text-secondary)]">
+        {skill.out_of_sample
+          ? `Held-out storm: the outage model was fitted on ${scenario.model.trained_on} and is scored here without refitting.`
+          : "Reference storm: the outage model is fitted here, then tested on other storms."}{" "}
+        Truth is VIIRS night-light loss around {skill.n} lit substations.
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <Tile label="ROC AUC" value={skill.auc == null ? "–" : skill.auc.toFixed(2)} hint="separates dark from lit" />
+        <Tile label="Brier score" value={skill.brier == null ? "–" : skill.brier.toFixed(3)} hint="lower is better" />
+        <Tile
+          label="Spearman"
+          value={skill.spearman == null ? "–" : skill.spearman.toFixed(2)}
+          hint="wind vs light loss"
+        />
+        <Tile label="Went dark" value={percent(skill.observed_outage_rate)} hint="≥ 50% light loss" />
+      </div>
+
+      <section aria-label="Median night-light loss by modelled wind band">
+        <h3 className="mb-1 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+          Median light loss by modelled wind
+        </h3>
+        <div className="h-44">
+          <ResponsiveContainer>
+            <BarChart data={bands} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
+              <CartesianGrid stroke="rgb(255 255 255 / 0.06)" vertical={false} />
+              <XAxis dataKey="band" unit=" kt" tick={AXIS_TICK} stroke="transparent" />
+              <YAxis unit="%" domain={[0, 100]} tick={AXIS_TICK} stroke="transparent" width={52} />
+              <Tooltip
+                cursor={{ fill: "rgb(255 255 255 / 0.04)" }}
+                contentStyle={TOOLTIP_STYLE}
+                formatter={(_value, _name, item) => [
+                  `${Math.round(item.payload.raw)}% (n=${item.payload.n})`,
+                  "median loss",
+                ]}
+              />
+              <Bar
+                dataKey="median"
+                fill="var(--series-1)"
+                radius={[4, 4, 0, 0]}
+                maxBarSize={36}
+                isAnimationActive={false}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      <section aria-label="Predicted outage probability against observed light loss per substation">
+        <h3 className="mb-1 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+          Predicted vs observed, per substation
+        </h3>
+        <div className="h-52">
+          <ResponsiveContainer>
+            <ScatterChart margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
+              <CartesianGrid stroke="rgb(255 255 255 / 0.06)" />
+              <XAxis
+                dataKey="p"
+                type="number"
+                domain={[0, 1]}
+                tickFormatter={(v: number) => percent(v)}
+                tick={AXIS_TICK}
+                stroke="transparent"
+                name="predicted"
+              />
+              <YAxis
+                dataKey="loss"
+                type="number"
+                domain={[-50, 100]}
+                unit="%"
+                tick={AXIS_TICK}
+                stroke="transparent"
+                width={52}
+                name="observed"
+              />
+              <Tooltip
+                contentStyle={TOOLTIP_STYLE}
+                formatter={(value, name) =>
+                  name === "predicted"
+                    ? [percent(Number(value)), "predicted outage"]
+                    : [`${Math.round(Number(value))}%`, "observed light loss"]
+                }
+              />
+              <Scatter
+                data={lit.map((s) => ({ p: s.p_outage, loss: Math.max(-50, s.loss_pct ?? 0), name: s.name }))}
+                fill="var(--series-1)"
+                fillOpacity={0.75}
+                isAnimationActive={false}
+              />
+            </ScatterChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+    </div>
+  );
+}

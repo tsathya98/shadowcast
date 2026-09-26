@@ -23,13 +23,14 @@ Built for **Build with AI: Code for Communities, Second Edition**, Track 5 *(Tra
 
 | Path | What |
 |---|---|
+| [`apps/web`](apps/web) | Operations console: Google Maps + deck.gl, timeline replay, ensemble spaghetti, ranked assets with reasons, backtest; Next.js 16 on Vercel |
 | [`services/geo`](services/geo) | Hazard per asset, calibrated outage probability, ranking with reasons, satellite backtests; FastAPI on Cloud Run |
 | [`services/archiver`](services/archiver) | Cloud Run Job that snapshots GDACS, NDMA SACHET, IBTrACS and WeatherNext 2 every 6 h for as-issued replays |
 | [`infra`](infra) | Idempotent `gcloud` deployment scripts |
 
 **As-issued forecast replay:** ShadowCast replays ECMWF's 52-member ensemble as it was issued, 68 to 20 hours before landfall. Every member drives the same wind model, so each asset gets the probability of gales and hurricane-force wind, and when gales arrive. For Cyclone Dana (2024) at 44 h lead, 94-96 % of members put gales on Paradip's hospitals and Mahakalapada's shelters about 15 h before landfall.
 
-Coming next: `apps/web`, the Next.js operations console with the Gemini agent, on Vercel.
+Coming next: the Gemini agent in the console (explanations, CAP 1.2 advisories in Odia/Hindi/English with audio, officer approval) and Vercel deployment.
 
 ## Stack
 
