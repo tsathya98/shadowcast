@@ -6,6 +6,9 @@ export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   test: {
     include: ["src/**/*.test.ts"],
-    coverage: { include: ["src/lib/format.ts", "src/lib/advisory.ts"], thresholds: { lines: 90, branches: 90 } },
+    coverage: {
+      include: ["src/lib/format.ts", "src/lib/advisory.ts", "src/lib/alerts.ts"],
+      thresholds: { lines: 90, branches: 90 },
+    },
   },
 });

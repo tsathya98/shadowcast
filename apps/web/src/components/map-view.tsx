@@ -28,6 +28,27 @@ const WHITE: Rgb = [255, 255, 255];
 const VOID: Rgb = [14, 16, 18];
 const MEMBER: [number, number, number, number] = [127, 167, 217, 95]; // --member: cool and recessive under the risk dots
 const AMBER: Rgb = [242, 138, 46]; // --accent
+const PULSE_MS = 2400;
+
+/** Two rings expanding from the radius of maximum wind and fading, half a cycle apart: the storm's heartbeat. */
+function pulseLayers(storm: StormPosition, phase: number) {
+  return [0, 0.5].map((offset) => {
+    const p = (phase + offset) % 1;
+    return new ScatterplotLayer<StormPosition>({
+      id: `storm-pulse-${offset}`,
+      data: [storm],
+      getPosition: (s) => [s.lon, s.lat],
+      getRadius: (s) => s.rmw_km * 1000 * (1 + 2.2 * p),
+      radiusUnits: "meters",
+      stroked: true,
+      filled: false,
+      getLineColor: [...AMBER, Math.round(230 * (1 - p))] as [number, number, number, number],
+      lineWidthUnits: "pixels",
+      getLineWidth: 1.5,
+      updateTriggers: { getRadius: p, getLineColor: p },
+    });
+  });
+}
 
 // Near-black cartography: land in the panel tone, water in the void, faint boundaries and town names only, so the
 // storm and the risk dots are the only light on the map.
@@ -55,7 +76,13 @@ function lines(collection: TrackFeatureCollection | undefined): Path[] {
     .map((f, i) => ({ id: String(f.properties.member ?? i), path: f.geometry.coordinates as [number, number][] }));
 }
 
-function DeckOverlay({ layers, tooltip }: { layers: unknown[]; tooltip: (info: PickingInfo) => string | null }) {
+interface DeckOverlayProps {
+  layers: unknown[];
+  tooltip: (info: PickingInfo) => string | null;
+  pulse: StormPosition | null;
+}
+
+function DeckOverlay({ layers, tooltip, pulse }: DeckOverlayProps) {
   const map = useMap();
   const overlay = useRef<GoogleMapsOverlay | null>(null);
   const latest = useRef({ layers, tooltip });
@@ -83,10 +110,23 @@ function DeckOverlay({ layers, tooltip }: { layers: unknown[]; tooltip: (info: P
     };
   }, [map]);
 
+  // Animate the storm pulse on the overlay directly (no React re-render per frame); hold it still for reduced motion.
   useEffect(() => {
     latest.current = { layers, tooltip };
-    overlay.current?.setProps({ layers: layers as never[], getTooltip: tooltip });
-  }, [layers, tooltip]);
+    if (!pulse) {
+      overlay.current?.setProps({ layers: layers as never[], getTooltip: tooltip });
+      return;
+    }
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let frame = 0;
+    const draw = (now: number) => {
+      const phase = still ? 0.35 : (now % PULSE_MS) / PULSE_MS;
+      overlay.current?.setProps({ layers: [...layers, ...pulseLayers(pulse, phase)] as never[], getTooltip: tooltip });
+      if (!still) frame = requestAnimationFrame(draw);
+    };
+    frame = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(frame);
+  }, [layers, tooltip, pulse]);
   return null;
 }
 
@@ -179,7 +219,7 @@ export function MapView(props: MapViewProps) {
         zoomControl
       >
         <FitRegion region={region} />
-        <DeckOverlay layers={layers} tooltip={tooltip} />
+        <DeckOverlay layers={layers} tooltip={tooltip} pulse={storm} />
       </GoogleMap>
     </APIProvider>
   );

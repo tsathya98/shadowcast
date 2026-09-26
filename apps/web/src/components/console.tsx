@@ -8,11 +8,13 @@ import { useCallback, useMemo, useState } from "react";
 import { AssetDetail } from "@/components/asset-detail";
 import { AssetList } from "@/components/asset-list";
 import { BacktestPanel } from "@/components/backtest-panel";
+import { LiveAlerts } from "@/components/live-alerts";
 import { PreparePanel } from "@/components/prepare-panel";
 import { ReplayStrip } from "@/components/replay-strip";
 import { Timeline } from "@/components/timeline";
 import { useAssets, useForecastTracks, useHazard, useScenario, useTrack } from "@/lib/api";
 import { LANGUAGES, REGION_LANGUAGE } from "@/lib/advisory";
+import { liveAlerts } from "@/lib/alerts";
 import { type ColorBy, compactNumber, kindLabel, rgbCss, riskColor } from "@/lib/format";
 import type { ReplayMode, ScenarioSummary } from "@/lib/types";
 
@@ -85,6 +87,19 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   const assets = useMemo(() => page?.items ?? [], [page]);
   const selected = assets.find((a) => a.asset_id === selectedId) ?? null;
   const atRisk = useMemo(() => assets.filter((a) => a.p_outage >= 0.5).length, [assets]);
+  const alerts = useMemo(
+    () =>
+      scenario && timeMs != null
+        ? liveAlerts({
+            assets,
+            timeMs,
+            landfall: scenario.landfall,
+            storm: scenario.storm,
+            stormVmaxKt: hazard?.storm?.vmax_kt ?? null,
+          })
+        : [],
+    [assets, timeMs, scenario, hazard],
+  );
 
   const changeScenario = (id: string) => {
     setScenarioId(id);
@@ -169,7 +184,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
             value={scenarioId}
             onChange={(event) => changeScenario(event.target.value)}
             aria-label="Storm"
-            className="min-w-0 flex-1 cursor-pointer truncate rounded-full border border-[var(--line-strong)] bg-[var(--surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] hover:bg-[var(--surface-3)]"
+            className="min-w-0 flex-1 cursor-pointer truncate rounded-full border lg:max-w-80 border-[var(--line-strong)] bg-[var(--surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] hover:bg-[var(--surface-3)]"
           >
             {scenarios.map((s) => (
               <option key={s.id} value={s.id}>
@@ -204,6 +219,13 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
           </div>
         )}
       </header>
+
+      {/* Live alerts float over the map's top-right, clear of the readouts and the panel. */}
+      <div className="pointer-events-none absolute top-[84px] right-[432px] hidden lg:block">
+        <div className="pointer-events-auto">
+          <LiveAlerts alerts={alerts} onSelect={openAsset} />
+        </div>
+      </div>
 
       {/* Legend and encoding switch. */}
       <div className="glass relative mx-4 mb-3 rounded-2xl p-3 lg:absolute lg:bottom-[116px] lg:left-4 lg:m-0 lg:w-72">
