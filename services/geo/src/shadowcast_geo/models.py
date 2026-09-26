@@ -77,6 +77,7 @@ class Asset(Schema):
     gale_arrival: str | None = Field(default=None, description="First time the modelled wind reaches 34 kt")
     population: float | None
     elevation_m: float | None
+    terrain_factor: float = Field(default=1.0, description="10 m wind over this terrain relative to open sea")
     criticality: int
     p_outage: float
     score: float

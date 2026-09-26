@@ -64,6 +64,7 @@ class LoadedScenario:
         by_id: Asset lookup by id.
         lat: Asset latitudes in rank order.
         lon: Asset longitudes in rank order.
+        factor: Asset terrain factors in rank order.
         backtest: Backtest artifact.
         forecasts: Ensemble forecast replays keyed by forecast key.
     """
@@ -75,6 +76,7 @@ class LoadedScenario:
     by_id: dict[str, Asset]
     lat: NDArray[np.float64]
     lon: NDArray[np.float64]
+    factor: NDArray[np.float64]
     backtest: dict[str, Any]
     forecasts: dict[str, LoadedForecast]
 
@@ -146,6 +148,7 @@ def load_scenarios(store: ArtifactStore) -> dict[str, LoadedScenario]:
             by_id={asset.asset_id: asset for asset in assets},
             lat=np.array([asset.lat for asset in assets]),
             lon=np.array([asset.lon for asset in assets]),
+            factor=np.array([asset.terrain_factor for asset in assets]),
             backtest=store.read_json(f"{prefix}/backtest.json"),
             forecasts=forecasts,
         )
@@ -262,7 +265,7 @@ async def asset_detail(scenario: ScenarioDep, asset_id: str) -> AssetDetail:
     asset = scenario.by_id.get(asset_id)
     if asset is None:
         raise HTTPException(status_code=404, detail=f"unknown asset {asset_id!r}")
-    times, winds = wind_timeline(asset.lat, asset.lon, scenario.track)
+    times, winds = wind_timeline(asset.lat, asset.lon, scenario.track, asset.terrain_factor)
     timeline = [
         TimelinePoint(
             time=f"{np.datetime_as_string(t, unit='s')}Z", wind_kt=None if np.isnan(w) else round(float(w), 1)
@@ -281,7 +284,7 @@ async def hazard(scenario: ScenarioDep, at: Annotated[datetime, Query(descriptio
         at=at_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
         storm=StormPosition.model_validate(position) if position else None,
         asset_ids=[a.asset_id for a in scenario.assets],
-        wind_kt=np.round(wind_at(scenario.lat, scenario.lon, scenario.track, at_utc), 1).tolist(),
+        wind_kt=np.round(wind_at(scenario.lat, scenario.lon, scenario.track, at_utc, scenario.factor), 1).tolist(),
     )
 
 
