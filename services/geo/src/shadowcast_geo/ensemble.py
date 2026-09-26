@@ -204,8 +204,8 @@ def ensemble_impact(
     Returns:
         dict[str, NDArray[Any]]: Per asset: ``p_outage`` (member mean), ``p34`` and ``p64`` (share of members
         reaching gale / hurricane force), ``wind_p10``/``peak_wind_kt``/``wind_p90`` (peak-wind percentiles),
-        ``min_dist_km`` (median closest approach), ``peak_time`` and ``gale_arrival`` (median over members that reach
-        the threshold; NaT otherwise).
+        ``min_dist_km`` (median closest approach), and the median ``closest_time``, ``peak_time`` and ``gale_arrival``
+        (over members where defined; NaT otherwise).
     """
     results = [exposure(lat, lon, Track.from_records(fixes)) for fixes in storm.members.values()]
     peak = np.vstack([r["peak_wind_kt"] for r in results])  # (members, assets)
@@ -219,6 +219,7 @@ def ensemble_impact(
         "peak_wind_kt": p50,
         "wind_p90": p90,
         "min_dist_km": np.median(np.vstack([r["min_dist_km"] for r in results]), axis=0),
+        "closest_time": _median_time(np.vstack([r["closest_time"] for r in results])),
         "peak_time": _median_time(np.vstack([r["peak_time"] for r in results])),
         "gale_arrival": _median_time(np.vstack([r["gale_arrival"] for r in results])),
     }

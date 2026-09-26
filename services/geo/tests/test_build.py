@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from shadowcast_geo import build
+from shadowcast_geo.api import load_scenarios
 from shadowcast_geo.artifacts import LocalArtifacts
 from shadowcast_geo.calibration import OutageModel
 from shadowcast_geo.config import SCENARIOS, Settings
@@ -88,6 +89,18 @@ def test_main_builds_every_scenario(pipeline: LocalArtifacts) -> None:
     assert forecast_assets[0]["members"] == 4
     tracks = pipeline.read_json("scenarios/dana-2024/forecasts/20241022T00Z/tracks.json")
     assert [t["member"] for t in tracks] == [1, 2, 3, 4]
+
+
+def test_build_output_satisfies_api_schemas(pipeline: LocalArtifacts) -> None:
+    build.main([])
+
+    loaded = load_scenarios(pipeline)  # validates every artifact against the API response models
+
+    assert set(loaded) == set(SCENARIOS)
+    assert len(loaded["dana-2024"].forecasts) == 5
+    first = next(iter(loaded["dana-2024"].forecasts.values()))
+    assert first.assets[0].closest_time is not None
+    assert loaded["fani-2019"].assets[0].gale_arrival is not None
     assets: list[dict[str, Any]] = pipeline.read_json("scenarios/fani-2019/assets.json")
     assert [a["rank"] for a in assets] == list(range(1, 10))
     assert assets[0]["peak_time"].endswith("Z")

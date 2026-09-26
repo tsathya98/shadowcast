@@ -138,6 +138,7 @@ def test_ensemble_impact_aggregates_members(model: OutageModel) -> None:
     assert impact["gale_arrival"][0] == np.datetime64("2019-05-02T12:52:30")
     assert np.isnat(impact["gale_arrival"][1])
     assert impact["peak_time"][0] == np.datetime64("2019-05-02T21:00:00")
+    assert impact["closest_time"][0] == np.datetime64("2019-05-02T21:00:00")
 
 
 def test_load_ensemble_downloads_when_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
