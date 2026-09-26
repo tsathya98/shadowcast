@@ -11,9 +11,9 @@ from shadowcast_geo.config import Settings
 from tests.conftest import make_fixes
 
 
-def _asset(asset_id: str, rank: int, kind: str, score: float, lon: float) -> dict[str, Any]:
+def _asset(asset_id: str, rank: int, kind: str, score: float, lon: float, name: str | None = None) -> dict[str, Any]:
     return {
-        "asset_id": asset_id, "rank": rank, "kind": kind, "name": None, "source": "OpenStreetMap",
+        "asset_id": asset_id, "rank": rank, "kind": kind, "name": name, "source": "OpenStreetMap",
         "lat": 19.5, "lon": lon, "peak_wind_kt": 110.0, "peak_time": "2019-05-02T21:00:00Z", "min_dist_km": 5.0,
         "closest_time": "2019-05-02T21:00:00Z", "band_kt": 64, "band_entry": "2019-05-02T18:00:00Z",
         "population": 1000.0, "elevation_m": 3.0, "criticality": 5, "p_outage": 0.9, "score": score,
@@ -39,7 +39,8 @@ def store(tmp_path: Path) -> LocalArtifacts:
     })  # fmt: skip
     artifacts.write_json("scenarios/fani-2019/track.json", make_fixes())
     artifacts.write_json("scenarios/fani-2019/assets.json", [
-        _asset("osm:node/1", 1, "hospital", 0.9, 86.05), _asset("osm:way/2", 2, "school", 0.36, 86.4)
+        _asset("osm:node/1", 1, "hospital", 0.9, 86.05, "District Hospital Puri"),
+        _asset("osm:way/2", 2, "school", 0.36, 86.4),
     ])  # fmt: skip
     artifacts.write_json("scenarios/fani-2019/backtest.json", {"skill": {"auc": 0.91}, "substations": []})
     forecast_asset = {**_asset("osm:node/1", 1, "hospital", 0.4, 86.05), "p34": 0.9, "p64": 0.25, "wind_p10": 40.0,
@@ -85,6 +86,8 @@ def test_track_geojson(client: TestClient) -> None:
         ("?kind=school&kind=hospital&limit=1", ["osm:node/1"], 2),
         ("?min_score=0.5", ["osm:node/1"], 1),
         ("?offset=1", ["osm:way/2"], 2),
+        ("?q=PURI", ["osm:node/1"], 1),
+        ("?q=way/2", ["osm:way/2"], 1),
     ],
 )
 def test_assets_filters(client: TestClient, query: str, expected_ids: list[str], expected_total: int) -> None:

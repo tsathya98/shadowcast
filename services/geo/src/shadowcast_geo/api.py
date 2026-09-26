@@ -83,13 +83,14 @@ class AssetQuery(BaseModel):
     """Filters shared by the asset listing endpoints."""
 
     kind: list[str] | None = Field(default=None, description="Filter by asset kind (repeatable)")
+    q: str | None = Field(default=None, min_length=2, description="Case-insensitive substring of the name or id")
     min_score: float = Field(default=0.0, ge=0, le=1, description="Minimum priority score")
     limit: int = Field(default=100, ge=1, le=5000)
     offset: int = Field(default=0, ge=0)
 
 
 def paginate[AssetT: Asset](items: Sequence[AssetT], query: AssetQuery) -> tuple[int, list[AssetT]]:
-    """Filter rank-ordered assets by kind and minimum score, then slice a page.
+    """Filter rank-ordered assets by kind, name/id search and minimum score, then slice a page.
 
     Args:
         items: Assets in rank order.
@@ -98,7 +99,14 @@ def paginate[AssetT: Asset](items: Sequence[AssetT], query: AssetQuery) -> tuple
     Returns:
         tuple[int, list[AssetT]]: Total matches and the requested page.
     """
-    selected = [a for a in items if (not query.kind or a.kind in query.kind) and a.score >= query.min_score]
+    needle = query.q.casefold() if query.q else None
+    selected = [
+        a
+        for a in items
+        if (not query.kind or a.kind in query.kind)
+        and a.score >= query.min_score
+        and (needle is None or needle in f"{a.name or ''} {a.asset_id}".casefold())
+    ]
     return len(selected), selected[query.offset : query.offset + query.limit]
 
 
@@ -243,7 +251,7 @@ async def track_geojson(scenario: ScenarioDep) -> dict[str, Any]:
 
 @router.get("/scenarios/{scenario_id}/assets")
 async def assets(scenario: ScenarioDep, query: AssetQueryDep) -> AssetPage:
-    """Assets in priority order (best-track replay), optionally filtered by kind and minimum score."""
+    """Assets in priority order (best-track replay), optionally filtered by kind, name/id search and minimum score."""
     total, items = paginate(scenario.assets, query)
     return AssetPage(total=total, items=items)
 
