@@ -85,7 +85,7 @@ export function BriefPanel({
               <li key={action.agency}>
                 <button
                   type="button"
-                  onClick={() => onOpenAsset(action.leadId)}
+                  onClick={() => action.leadId && onOpenAsset(action.leadId)}
                   className="w-full rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-3.5 py-3 text-left transition-colors hover:border-[var(--line-strong)]"
                 >
                   <div className="flex items-center gap-2">

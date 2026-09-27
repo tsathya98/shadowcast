@@ -3,7 +3,7 @@ import pytest
 
 from shadowcast_geo.config import GRAVITY, MIN_WATER_DEPTH_M, RHO_SEA, SHELF_DEPTH_M, TRANSECT_STEP_KM
 from shadowcast_geo.hazard import Track
-from shadowcast_geo.surge import Coast, coast_from_grid, coastal_surge, destination, inundation, wind_setup
+from shadowcast_geo.surge import coast_from_grid, coastal_surge, destination, inundation, wind_setup
 from tests.conftest import CELL_DEG, east_facing_coast, make_fixes
 
 BBOX = (18.6, 84.0, 20.4, 88.0)
@@ -85,12 +85,16 @@ def test_coastal_surge_is_nan_when_the_storm_stays_far_away() -> None:
 
 
 def test_inundation_decays_inland_and_stays_above_the_ground() -> None:
-    coast = Coast(
-        lat=np.array([19.5]), lon=np.array([86.0]), seaward_deg=np.array([90.0]), depth_m=np.full((1, 2), 5.0)
-    )
     lon = 86.0 - np.array([0.0, 14.5, 1.0]) / (111.195 * np.cos(np.radians(19.5)))
 
-    out = inundation(np.full(3, 19.5), lon, np.array([0.5, 0.0, np.nan]), coast, np.array([2.0]))
+    out = inundation(
+        np.full(3, 19.5),
+        lon,
+        np.array([0.5, 0.0, np.nan]),
+        coast_lat=np.array([19.5]),
+        coast_lon=np.array([86.0]),
+        peak_m=np.array([2.0]),
+    )
 
     assert out["coast_km"][:2] == pytest.approx([0.0, 14.5], abs=0.1)
     assert out["surge_m"] == pytest.approx([2.0, 2.0, 2.0])

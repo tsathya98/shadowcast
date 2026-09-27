@@ -47,16 +47,18 @@ from shadowcast_geo.config import (
 )
 from shadowcast_geo.ensemble import ensemble_impact, load_ensemble, select_storm
 from shadowcast_geo.hazard import Track, exposure, track_position
-from shadowcast_geo.inputs import download, load_assets, load_best_track
+from shadowcast_geo.inputs import download, fetch_osm_roads, load_assets, load_best_track
 from shadowcast_geo.insurance import best_track_triggers, forecast_triggers
 from shadowcast_geo.ranking import rank_assets
+from shadowcast_geo.roads import nearest_access, road_status, sample_roads
 from shadowcast_geo.surge import coast_from_grid, coastal_surge, inundation
 
 logger = logging.getLogger("shadowcast_geo.build")
 
 MODEL_PATH = "models/outage.json"
+HAZARD_BLOCK = 2000  # road samples per hazard computation
 INDEX_PATH = "scenarios/index.json"
-TIME_COLUMNS = ("peak_time", "closest_time", "band_entry", "gale_arrival")
+TIME_COLUMNS = ("peak_time", "closest_time", "band_entry", "gale_arrival", "access_closes")
 ASSET_FIELDS = [
     "asset_id",
     "rank",
@@ -80,6 +82,9 @@ ASSET_FIELDS = [
     "flood_m",
     "rain_mm",
     "observed_rain_mm",
+    "road_km",
+    "access_road",
+    "access_closes",
     "criticality",
     "p_outage",
     "score",
@@ -88,7 +93,8 @@ ASSET_FIELDS = [
 ]
 SURGE_FIELDS = ["lat", "lon", "peak_m", "setup_m", "barometer_m", "peak_time"]
 # Surge is modelled on the best track only: a forecast replay must not carry hindsight.
-FORECAST_FIELDS = [f for f in ASSET_FIELDS if f not in ("coast_km", "surge_m", "flood_m", "observed_rain_mm")] + [
+HINDSIGHT_FIELDS = ("coast_km", "surge_m", "flood_m", "observed_rain_mm", "road_km", "access_road", "access_closes")
+FORECAST_FIELDS = [f for f in ASSET_FIELDS if f not in HINDSIGHT_FIELDS] + [
     "p_rain",
     "p34",
     "p64",
@@ -117,6 +123,7 @@ ROUNDING = {
     "surge_m": 2,
     "flood_m": 2,
     "rain_mm": 0,
+    "road_km": 1,
     "observed_rain_mm": 0,
     "p_rain": 3,
     "peak_m": 2,
@@ -252,7 +259,14 @@ def model_surge(
     coastal = coastal_surge(coast, track)
     lat, lon = assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float)
     assets = assets.assign(
-        **inundation(lat, lon, assets["elevation_m"].to_numpy(dtype=float), coast, coastal["peak_m"])
+        **inundation(
+            lat,
+            lon,
+            assets["elevation_m"].to_numpy(dtype=float),
+            coast_lat=coast.lat,
+            coast_lon=coast.lon,
+            peak_m=coastal["peak_m"],
+        )
     )
     crest = int(np.nanargmax(coastal["peak_m"]))
     observed: dict[str, Any] | None = None
@@ -274,6 +288,100 @@ def model_surge(
         "observed": observed,
     }
     return assets, pd.DataFrame({"lat": coast.lat, "lon": coast.lon, **coastal}), summary
+
+
+def score_rain(scenario: Scenario, assets: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Measure storm rain by satellite at every asset and score the modelled rain against it.
+
+    Args:
+        scenario: The scenario (landfall sets the measurement window).
+        assets: Assets with modelled ``rain_mm``.
+
+    Returns:
+        tuple[pd.DataFrame, dict[str, Any]]: Assets with ``observed_rain_mm`` and the rain summary for the index.
+    """
+    window = timedelta(days=RAINFALL_WINDOW_DAYS)
+    assets = assets.assign(
+        observed_rain_mm=earth.observed_rain(assets, scenario.landfall - window, scenario.landfall + window)
+    )
+    modelled_rain, measured_rain = (
+        assets["rain_mm"].to_numpy(dtype=float),
+        assets["observed_rain_mm"].to_numpy(dtype=float),
+    )
+    measured = np.isfinite(measured_rain)
+    rain = {
+        "model": "R-CLIPER parametric rain (Tuleya et al. 2007) along the best track",
+        "truth": f"NASA GPM IMERG V07, {RAINFALL_WINDOW_DAYS} days either side of landfall",
+        "n": int(measured.sum()),
+        "spearman": spearman(modelled_rain[measured], measured_rain[measured]),
+        "median_ratio": float(np.median(modelled_rain[measured] / np.maximum(measured_rain[measured], 1.0))),
+        "max_modelled_mm": round(float(modelled_rain.max()), 0),
+        "max_observed_mm": round(float(np.nanmax(measured_rain)), 0),
+        "extreme_sites": int((modelled_rain >= EXTREME_RAIN_MM).sum()),
+    }
+    return assets, rain
+
+
+def model_roads(
+    roads: list[dict[str, Any]], track: Track, assets: pd.DataFrame, surge_points: pd.DataFrame
+) -> tuple[dict[str, Any], dict[str, Any], pd.DataFrame]:
+    """Run the hazard along every arterial road, then link each site to its nearest road.
+
+    Args:
+        roads: Arterial roads (see :func:`fetch_osm_roads`).
+        track: The best track.
+        assets: Assets with ``lat`` and ``lon``.
+        surge_points: Peak surge per open-coast point (``lat``, ``lon``, ``peak_m``).
+
+    Returns:
+        tuple[dict[str, Any], dict[str, Any], pd.DataFrame]: The roads as a GeoJSON FeatureCollection, the road summary
+        for the scenario index, and the assets with ``road_km``, ``access_road`` and ``access_closes``.
+    """
+    samples = sample_roads(roads)
+    lat, lon = samples["lat"].to_numpy(dtype=float), samples["lon"].to_numpy(dtype=float)
+    # Thousands of samples times a densified track: run the hazard in blocks to bound memory.
+    blocks = [
+        exposure(lat[i : i + HAZARD_BLOCK], lon[i : i + HAZARD_BLOCK], track) for i in range(0, lat.size, HAZARD_BLOCK)
+    ]
+    hazard = {key: np.concatenate([block[key] for block in blocks]) for key in blocks[0]}
+    samples = samples.assign(**hazard, elevation_m=earth.ground_elevation(samples).to_numpy())
+    samples["flood_m"] = inundation(
+        lat,
+        lon,
+        samples["elevation_m"].to_numpy(dtype=float),
+        coast_lat=surge_points["lat"].to_numpy(dtype=float),
+        coast_lon=surge_points["lon"].to_numpy(dtype=float),
+        peak_m=surge_points["peak_m"].to_numpy(dtype=float),
+    )["flood_m"]
+    statuses = road_status(roads, samples)
+    access = nearest_access(assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float), samples, statuses)
+    cut = [s for s in statuses if s["status"] == "cut"]
+    closures = sorted(s["closes_at"] for s in cut if s["closes_at"])
+    summary = {
+        "roads": len(statuses),
+        "km": round(sum(s["length_km"] for s in statuses)),
+        "km_cut": round(sum(s["length_km"] for s in cut)),
+        "km_at_risk": round(sum(s["length_km"] for s in statuses if s["status"] == "at risk")),
+        "first_closure": closures[0] if closures else None,
+        "cut_by_surge": sum("surge" in s["causes"] for s in statuses),
+    }
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": s["path"]},
+                "properties": {k: v for k, v in s.items() if k != "path"},
+            }
+            for s in statuses
+        ],
+    }
+    linked = assets.assign(
+        road_km=access["road_km"].to_numpy(),
+        access_road=access["access_road"].to_numpy(),
+        access_closes=access["access_closes"].to_numpy(),
+    )
+    return geojson, summary, linked
 
 
 def build_scenario(
@@ -301,23 +409,10 @@ def build_scenario(
     lat, lon = assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float)
     assets = earth.enrich(assets.assign(**exposure(lat, lon, track), district=earth.districts(assets)))
     assets, surge_points, surge = model_surge(scenario, track, assets)
-    window = timedelta(days=RAINFALL_WINDOW_DAYS)
-    assets["observed_rain_mm"] = earth.observed_rain(assets, scenario.landfall - window, scenario.landfall + window)
-    modelled_rain, measured_rain = (
-        assets["rain_mm"].to_numpy(dtype=float),
-        assets["observed_rain_mm"].to_numpy(dtype=float),
+    roads, road_summary, assets = model_roads(
+        fetch_osm_roads(client, settings, scenario.region), track, assets, surge_points
     )
-    measured = np.isfinite(measured_rain)
-    rain = {
-        "model": "R-CLIPER parametric rain (Tuleya et al. 2007) along the best track",
-        "truth": f"NASA GPM IMERG V07, {RAINFALL_WINDOW_DAYS} days either side of landfall",
-        "n": int(measured.sum()),
-        "spearman": spearman(modelled_rain[measured], measured_rain[measured]),
-        "median_ratio": float(np.median(modelled_rain[measured] / np.maximum(measured_rain[measured], 1.0))),
-        "max_modelled_mm": round(float(modelled_rain.max()), 0),
-        "max_observed_mm": round(float(np.nanmax(measured_rain)), 0),
-        "extreme_sites": int((modelled_rain >= EXTREME_RAIN_MM).sum()),
-    }
+    assets, rain = score_rain(scenario, assets)
 
     substations = assets[assets["kind"] == "substation"]
     truth = substations[["asset_id", "lat", "lon", "district", "peak_wind_kt"]].join(
@@ -376,6 +471,7 @@ def build_scenario(
             "loss_by_band": bands,
             "surge": surge,
             "rain": rain,
+            "roads": road_summary,
             "insurance": {
                 "terms": "Illustrative: index = wind reached at 25% of a district's sites; "
                 "pays 25/50/100% at 64/83/96 kt",
@@ -390,6 +486,7 @@ def build_scenario(
     store.write_json(f"{prefix}/track.json", fixes)
     store.write_json(f"{prefix}/assets.json", frame_records(ranked, ASSET_FIELDS))
     store.write_json(f"{prefix}/surge.json", frame_records(surge_points, SURGE_FIELDS))
+    store.write_json(f"{prefix}/roads.json", roads)
     urls = earth.nightlight_image_urls(scenario.region.bbox, scenario.truth_pre, scenario.truth_post)
     for name, url in zip(EVIDENCE_IMAGES, urls, strict=True):
         image = download(client, settings, f"{scenario.id}-{name}.png", (url,))

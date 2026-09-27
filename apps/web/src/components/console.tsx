@@ -13,7 +13,7 @@ import { LiveAlerts } from "@/components/live-alerts";
 import { PreparePanel } from "@/components/prepare-panel";
 import { ReplayStrip } from "@/components/replay-strip";
 import { Timeline } from "@/components/timeline";
-import { useAssets, useForecastTracks, useHazard, useScenario, useSurge, useTrack } from "@/lib/api";
+import { useAssets, useForecastTracks, useHazard, useRoads, useScenario, useSurge, useTrack } from "@/lib/api";
 import { LANGUAGES, REGION_LANGUAGE } from "@/lib/advisory";
 import { liveAlerts } from "@/lib/alerts";
 import { dutyBrief } from "@/lib/brief";
@@ -81,6 +81,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   const { data: page, isLoading: assetsLoading } = useAssets(scenarioId, mode);
   const { data: members } = useForecastTracks(scenarioId, mode);
   const { data: surge } = useSurge(scenarioId, mode);
+  const { data: roads } = useRoads(scenarioId, mode);
 
   const span = useMemo(() => {
     const times = (track?.features ?? [])
@@ -127,9 +128,10 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
             storm: scenario.storm,
             region: scenario.region.name,
             landfall: scenario.landfall,
+            roads,
           })
         : null,
-    [assets, timeMs, scenario],
+    [assets, timeMs, scenario, roads],
   );
 
   const changeScenario = (id: string) => {
@@ -194,6 +196,8 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
             members={members}
             storm={mode.kind === "best-track" ? (hazard?.storm ?? null) : null}
             surge={surge}
+            roads={roads}
+            timeMs={timeMs}
             selectedId={selectedId}
             onSelect={select}
           />
@@ -289,6 +293,12 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
           <span>{LEGEND_ENDS[colorBy][0]}</span>
           <span>{LEGEND_ENDS[colorBy][1]}</span>
         </div>
+        {roads && (
+          <div className="mt-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+            <span className="h-0.5 w-5 bg-[var(--accent)]" aria-hidden /> Arterial road closed
+            <span className="ml-2 h-0.5 w-5 bg-[var(--text-muted)]" aria-hidden /> at risk
+          </div>
+        )}
         {surge && (
           <div className="mt-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
             <span className="size-2 rounded-full" style={{ background: rgbCss(rampColor(0.8, "flood")) }} aria-hidden />{" "}

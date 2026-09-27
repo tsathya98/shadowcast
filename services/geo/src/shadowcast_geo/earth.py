@@ -37,6 +37,7 @@ from shadowcast_geo.config import (
 from shadowcast_geo.surge import Grid
 
 RELIEF_CELL_DEG = 1.0 / 60.0  # ETOPO1's native 1 arc-minute
+EE_POINTS_PER_REQUEST = 4000  # Earth Engine aborts queries returning more than 5,000 features
 
 
 def initialize(project: str) -> None:
@@ -51,7 +52,9 @@ def initialize(project: str) -> None:
 def _reduce(
     points: pd.DataFrame, image: Any, reducer: Any, scale: float, buffer_m: float = 0
 ) -> dict[int, dict[str, Any]]:
-    """Reduce an image over every asset point (optionally buffered) in one request.
+    """Reduce an image over every asset point (optionally buffered), ``EE_POINTS_PER_REQUEST`` points per request.
+
+    Earth Engine aborts a query that returns more than 5,000 features, so large point sets go in batches.
 
     Args:
         points: Frame with ``lat`` and ``lon`` columns; its positional index identifies each feature.
@@ -63,16 +66,21 @@ def _reduce(
     Returns:
         dict[int, dict[str, Any]]: Reducer outputs keyed by positional index.
     """
-    features = ee.FeatureCollection(
-        [
-            ee.Feature(
-                ee.Geometry.Point([lon, lat]).buffer(buffer_m) if buffer_m else ee.Geometry.Point([lon, lat]), {"i": i}
-            )
-            for i, (lat, lon) in enumerate(zip(points["lat"], points["lon"], strict=True))
-        ]
-    )
-    result = image.reduceRegions(collection=features, reducer=reducer, scale=scale).getInfo()
-    return {int(f["properties"]["i"]): f["properties"] for f in result["features"]}
+    coordinates = list(enumerate(zip(points["lat"], points["lon"], strict=True)))
+    stats: dict[int, dict[str, Any]] = {}
+    for start in range(0, len(coordinates), EE_POINTS_PER_REQUEST):
+        features = ee.FeatureCollection(
+            [
+                ee.Feature(
+                    ee.Geometry.Point([lon, lat]).buffer(buffer_m) if buffer_m else ee.Geometry.Point([lon, lat]),
+                    {"i": i},
+                )
+                for i, (lat, lon) in coordinates[start : start + EE_POINTS_PER_REQUEST]
+            ]
+        )
+        result = image.reduceRegions(collection=features, reducer=reducer, scale=scale).getInfo()
+        stats.update({int(f["properties"]["i"]): f["properties"] for f in result["features"]})
+    return stats
 
 
 def enrich(assets: pd.DataFrame) -> pd.DataFrame:
@@ -93,14 +101,28 @@ def enrich(assets: pd.DataFrame) -> pd.DataFrame:
         .mosaic()
         .select("population")
     )
-    surface = ee.ImageCollection(ELEVATION).select("DEM").mosaic()
-    elevation = ee.Image(COASTAL_DTM).rename("DEM").unmask(surface)  # DeltaDTM covers the low coast only
     people = _reduce(assets, population, ee.Reducer.sum(), 100, POPULATION_RADIUS_M)
-    height = _reduce(assets, elevation, ee.Reducer.mean(), 30)
     enriched = assets.copy()
     enriched["population"] = [people.get(i, {}).get("sum", np.nan) for i in range(len(assets))]
-    enriched["elevation_m"] = [height.get(i, {}).get("mean", np.nan) for i in range(len(assets))]
+    enriched["elevation_m"] = ground_elevation(assets).to_numpy()
     return enriched.astype({"population": float, "elevation_m": float})
+
+
+def ground_elevation(points: pd.DataFrame) -> pd.Series:
+    """Ground elevation at each point: bare-earth DeltaDTM on the low coast, the Copernicus surface model inland.
+
+    Args:
+        points: Frame with ``lat`` and ``lon``.
+
+    Returns:
+        pd.Series: Metres above sea level, same index as ``points`` (NaN where unavailable).
+    """
+    surface = ee.ImageCollection(ELEVATION).select("DEM").mosaic()
+    elevation = ee.Image(COASTAL_DTM).rename("DEM").unmask(surface)  # DeltaDTM covers the low coast only
+    height = _reduce(points, elevation, ee.Reducer.mean(), 30)
+    return pd.Series(
+        [height.get(i, {}).get("mean", np.nan) for i in range(len(points))], index=points.index, dtype=float
+    )
 
 
 def _nightlight_windows(pre: tuple[date, date], post: tuple[date, date]) -> tuple[Any, Any]:

@@ -88,6 +88,39 @@ export interface DistrictTrigger {
   observed_outage_rate: number | null;
 }
 
+/** Arterial roads through the storm (best track). */
+export interface RoadSummary {
+  roads: number;
+  km: number;
+  km_cut: number;
+  km_at_risk: number;
+  first_closure: string | null;
+  cut_by_surge: number;
+}
+
+export interface RoadProperties {
+  road_id: string;
+  name: string | null;
+  ref: string | null;
+  highway: string;
+  length_km: number;
+  peak_wind_kt: number;
+  flood_m: number;
+  rain_mm: number;
+  status: "cut" | "at risk" | "open";
+  causes: string[];
+  closes_at: string | null;
+}
+
+export interface RoadCollection {
+  type: "FeatureCollection";
+  features: {
+    type: "Feature";
+    geometry: { type: "LineString"; coordinates: [number, number][] };
+    properties: RoadProperties;
+  }[];
+}
+
 /** Modelled storm rain against satellite-measured rain (best track). */
 export interface RainSummary {
   model: string;
@@ -139,6 +172,7 @@ export interface ScenarioDetail extends ScenarioSummary {
   loss_by_band: LossBand[];
   surge: SurgeSummary;
   rain: RainSummary;
+  roads: RoadSummary;
   insurance: { terms: string; districts: DistrictTrigger[] };
   forecasts: ForecastSummary[];
   built_at: string;
@@ -165,6 +199,10 @@ export interface Asset {
   /** Modelled storm-total rain (R-CLIPER); satellite-measured rain on the best track only. */
   rain_mm?: number | null;
   observed_rain_mm?: number | null;
+  /** The nearest arterial road and when it closes (best track only). */
+  road_km?: number | null;
+  access_road?: string | null;
+  access_closes?: string | null;
   /** Storm surge on the best track only: distance to the open coast, the peak surge there, water depth here. */
   coast_km?: number | null;
   surge_m?: number | null;

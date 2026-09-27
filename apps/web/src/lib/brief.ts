@@ -5,7 +5,7 @@
  * action. Pure and deterministic: every number comes from the ranked assets, never from Gemini.
  */
 import { assetName } from "./format";
-import type { Asset, ForecastAsset } from "./types";
+import type { Asset, ForecastAsset, RoadCollection } from "./types";
 
 export type Hazard = "lose power" | "get gales";
 
@@ -13,8 +13,8 @@ export interface BriefAction {
   agency: string;
   task: string;
   sites: number;
-  /** The group's highest-priority named site, opened when the action is clicked. */
-  leadId: string;
+  /** The group's highest-priority named site, opened when the action is clicked (null for roads). */
+  leadId: string | null;
   leadName: string;
   /** When gales first reach one of the group's sites (ISO), or null when they never do. */
   deadline: string | null;
@@ -45,6 +45,8 @@ interface BriefInput {
   storm: string;
   region: string;
   landfall: string;
+  /** Arterial roads with their status (best track); omitted in forecast replays. */
+  roads?: RoadCollection;
 }
 
 const HOUR_MS = 3_600_000;
@@ -92,7 +94,7 @@ function urgency(action: BriefAction): [number, number] {
  *
  * @returns The situation summary, exception counts and recommended actions, most urgent first.
  */
-export function dutyBrief({ assets, timeMs, storm, region, landfall }: BriefInput): Brief {
+export function dutyBrief({ assets, timeMs, storm, region, landfall, roads }: BriefInput): Brief {
   const hazard: Hazard = assets.some((a) => "p34" in a) ? "get gales" : "lose power";
   const likely = assets.filter((a) => ("p34" in a ? (a as ForecastAsset).p34 : a.p_outage) >= LIKELY);
   const galeMs = (a: Asset) => (a.gale_arrival ? Date.parse(a.gale_arrival) : Number.POSITIVE_INFINITY);
@@ -104,25 +106,58 @@ export function dutyBrief({ assets, timeMs, storm, region, landfall }: BriefInpu
   const surgeModelled = assets.some((a) => a.flood_m != null);
   const flooded = assets.filter((a) => (a.flood_m ?? 0) >= FLOOD_M);
 
-  const actions = AGENCIES.flatMap(({ agency, kinds, task, flood }): BriefAction[] => {
-    const group = (flood ? flooded : likely).filter((a) => kinds.includes(a.kind));
-    if (group.length === 0) return [];
-    const lead = group.find((a) => a.name) ?? group[0];
-    const first = Math.min(...group.map(galeMs));
+  const action = (
+    agency: string,
+    task: string,
+    sites: number,
+    lead: { id: string | null; name: string },
+    first: number,
+  ): BriefAction => {
     const deadline = Number.isFinite(first) ? new Date(first).toISOString() : null;
-    return [
-      {
-        agency,
-        task,
-        sites: group.length,
-        leadId: lead.asset_id,
-        leadName: assetName(lead),
-        deadline,
-        late: first <= timeMs,
-        hours: deadline == null ? null : first <= timeMs ? -hoursTo(first) : Math.max(1, hoursTo(first)),
-      },
-    ];
-  }).sort((a, b) => {
+    return {
+      agency,
+      task,
+      sites,
+      leadId: lead.id,
+      leadName: lead.name,
+      deadline,
+      late: first <= timeMs,
+      hours: deadline == null ? null : first <= timeMs ? -hoursTo(first) : Math.max(1, hoursTo(first)),
+    };
+  };
+  const cut = (roads?.features ?? []).filter((f) => f.properties.status === "cut");
+  const closeMs = (f: (typeof cut)[number]) =>
+    f.properties.closes_at ? Date.parse(f.properties.closes_at) : Number.POSITIVE_INFINITY;
+  const firstRoad = [...cut].sort((a, b) => closeMs(a) - closeMs(b))[0];
+  const roadName = (f: (typeof cut)[number]) => f.properties.name ?? f.properties.ref ?? "an unnamed road";
+
+  const actions = [
+    ...AGENCIES.flatMap(({ agency, kinds, task, flood }): BriefAction[] => {
+      const group = (flood ? flooded : likely).filter((a) => kinds.includes(a.kind));
+      if (group.length === 0) return [];
+      const lead = group.find((a) => a.name) ?? group[0];
+      return [
+        action(
+          agency,
+          task,
+          group.length,
+          { id: lead.asset_id, name: assetName(lead) },
+          Math.min(...group.map(galeMs)),
+        ),
+      ];
+    }),
+    ...(firstRoad
+      ? [
+          action(
+            "Public works",
+            "Stage tree-cutting and earth-moving crews on arterial roads",
+            cut.length,
+            { id: null, name: roadName(firstRoad) },
+            closeMs(firstRoad),
+          ),
+        ]
+      : []),
+  ].sort((a, b) => {
     const [groupA, keyA] = urgency(a);
     const [groupB, keyB] = urgency(b);
     return groupA - groupB || keyA - keyB;
@@ -145,13 +180,17 @@ export function dutyBrief({ assets, timeMs, storm, region, landfall }: BriefInpu
     drenched > 0
       ? ` Extremely heavy rain (204.5 mm or more) is modelled at ${drenched.toLocaleString("en-IN")} ${drenched === 1 ? "site" : "sites"}.`
       : "";
+  const kmCut = Math.round(cut.reduce((sum, f) => sum + f.properties.length_km, 0));
+  const roadsLine = firstRoad
+    ? ` About ${kmCut.toLocaleString("en-IN")} km of arterial road is likely to be cut; ${roadName(firstRoad)} closes first.`
+    : "";
   const surge =
     flooded.length > 0
       ? ` The storm surge could flood ${flooded.length.toLocaleString("en-IN")} ${flooded.length === 1 ? "site" : "sites"}.`
       : "";
 
   return {
-    summary: `${when} ${impact}${surge}${rain}`,
+    summary: `${when} ${impact}${surge}${rain}${roadsLine}`,
     hazard,
     likely: likely.length,
     reached,

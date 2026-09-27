@@ -136,6 +136,13 @@ export function AssetDetail({ scenarioId, asset, onBack }: AssetDetailProps) {
         )}
         <Stat label="Gales arrive" value={istStamp(asset.gale_arrival)} />
         <Stat label="People · 2 km" value={compactNumber(asset.population)} />
+        {asset.access_road != null && (
+          <Stat
+            label="Access road"
+            value={asset.access_closes ? istStamp(asset.access_closes) : "Stays open"}
+            hint={`${asset.access_road}, ${(asset.road_km ?? 0).toFixed(1)} km away${asset.access_closes ? ", closes then" : ""}`}
+          />
+        )}
         {asset.rain_mm != null && (
           <Stat
             label="Storm rain"

@@ -57,6 +57,13 @@ def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> MemoryArtifacts
     def fetch_image(_client: object, _settings: object, cache_name: str, urls: tuple[str, ...]) -> bytes:
         return f"{cache_name}:{urls[0]}".encode()
 
+    def roads(*_: object) -> list[dict[str, Any]]:
+        return [{"road_id": "osm:way/9", "name": "NH-16", "ref": "NH16", "highway": "trunk",
+                 "coords": [[19.2, 86.05], [19.8, 86.05]]}]  # fmt: skip
+
+    def ground(points: pd.DataFrame) -> pd.Series:
+        return pd.Series(3.0, index=points.index)
+
     def districts(points: pd.DataFrame) -> pd.Series:
         return pd.Series(["Puri"] * (len(points) - 1) + [None], index=points.index, dtype=object)
 
@@ -81,6 +88,8 @@ def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> MemoryArtifacts
     monkeypatch.setattr(build.earth, "districts", districts)
     monkeypatch.setattr(build.earth, "nightlight_image_urls", night_light_images)
     monkeypatch.setattr(build, "download", fetch_image)
+    monkeypatch.setattr(build, "fetch_osm_roads", roads)
+    monkeypatch.setattr(build.earth, "ground_elevation", ground)
     store = MemoryArtifacts()
 
     def artifact_store(_settings: Settings) -> MemoryArtifacts:
@@ -136,6 +145,13 @@ def test_build_output_satisfies_api_schemas(pipeline: MemoryArtifacts) -> None:
     assert {"coast_km", "surge_m", "flood_m", "rain_mm", "observed_rain_mm"} <= set(assets[0])
     rain = pipeline.read_json("scenarios/fani-2019/scenario.json")["rain"]
     assert rain["n"] == 9 and rain["max_observed_mm"] == 160.0 and rain["spearman"] is not None
+    roads = pipeline.read_json("scenarios/fani-2019/roads.json")["features"]
+    assert roads[0]["properties"]["status"] == "cut" and roads[0]["properties"]["closes_at"].endswith("Z")
+    summary_roads = pipeline.read_json("scenarios/fani-2019/scenario.json")["roads"]
+    assert summary_roads["roads"] == 1 and summary_roads["km_cut"] > 0
+    near = next(a for a in assets if a["asset_id"] == "osm:node/0")  # 3 km from the road
+    assert near["access_road"] == "NH-16" and near["access_closes"].endswith("Z") and near["road_km"] < 5
+    assert next(a for a in assets if a["kind"] == "cyclone_shelter")["access_road"] is None  # 26 km away
     image = pipeline.read_bytes("scenarios/fani-2019/evidence/night-lights-post.png")
     assert image == b"fani-2019-night-lights-post.png:https://ee.test/post"
     insurance = pipeline.read_json("scenarios/fani-2019/scenario.json")["insurance"]

@@ -21,6 +21,7 @@ from shadowcast_geo.config import (
     OSDMA_SHELTERS_URL,
     OSM_KINDS,
     OVERPASS_URLS,
+    ROAD_HIGHWAYS,
     WIND_BANDS_KT,
     Region,
     Settings,
@@ -156,6 +157,35 @@ def fetch_osm_assets(client: httpx.Client, settings: Settings, region: Region) -
                 }
             )
     return pd.DataFrame(rows, columns=ASSET_COLUMNS)
+
+
+def fetch_osm_roads(client: httpx.Client, settings: Settings, region: Region) -> list[dict[str, Any]]:
+    """Arterial roads (motorway, trunk and primary) in a region from OpenStreetMap, with their geometry.
+
+    Args:
+        client: HTTP client.
+        settings: Settings (cache, retries).
+        region: Study area.
+
+    Returns:
+        list[dict[str, Any]]: ``road_id``, ``name``, ``ref``, ``highway`` and ``coords`` (``[[lat, lon], ...]``) per
+        OSM way with at least two vertices.
+    """
+    bbox = ",".join(map(str, region.bbox))
+    classes = "|".join(ROAD_HIGHWAYS)
+    query = f'[out:json][timeout:300];way["highway"~"^({classes})$"]({bbox});out tags geom;'
+    body = download(client, settings, f"osm_roads_{region.id}.json", OVERPASS_URLS, method="POST", data={"data": query})
+    return [
+        {
+            "road_id": f"osm:way/{way['id']}",
+            "name": way.get("tags", {}).get("name") or way.get("tags", {}).get("name:en"),
+            "ref": way.get("tags", {}).get("ref"),
+            "highway": way.get("tags", {}).get("highway"),
+            "coords": [[point["lat"], point["lon"]] for point in way["geometry"]],
+        }
+        for way in json.loads(body)["elements"]
+        if len(way.get("geometry", [])) >= 2
+    ]
 
 
 def fetch_osdma_shelters(client: httpx.Client, settings: Settings, region: Region) -> pd.DataFrame:

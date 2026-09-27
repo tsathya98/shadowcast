@@ -34,6 +34,8 @@ def store() -> MemoryArtifacts:
         "rain": {"model": "R-CLIPER", "truth": "GPM IMERG", "n": 2, "spearman": 0.7, "median_ratio": 1.2,
                  "max_modelled_mm": 180.0, "max_observed_mm": 150.0, "extreme_sites": 0},
         "insurance": {"terms": "illustrative", "districts": []},
+        "roads": {"roads": 1, "km": 10, "km_cut": 10, "km_at_risk": 0, "first_closure": "2019-05-02T22:00:00Z",
+                  "cut_by_surge": 0},
         "surge": {"peak_m": 1.5, "lat": 19.8, "lon": 85.8, "time": "2019-05-03T03:00:00Z", "coast_points": 1,
                   "flooded_sites": 0, "method": "1D wind setup"},
         "forecasts": [{"key": "20190501T12Z", "issued": "2019-05-01T12:00:00Z", "lead_h": 39.5, "storm_id": "01B",
@@ -47,6 +49,7 @@ def store() -> MemoryArtifacts:
         _asset("osm:way/2", 2, "school", 0.36, 86.4),
     ])  # fmt: skip
     artifacts.write_json("scenarios/fani-2019/backtest.json", {"skill": {"auc": 0.91}, "substations": []})
+    artifacts.write_json("scenarios/fani-2019/roads.json", {"type": "FeatureCollection", "features": []})
     for name in ("night-lights-pre", "night-lights-post"):
         artifacts.write_bytes(f"scenarios/fani-2019/evidence/{name}.png", f"png:{name}".encode(), "image/png")
     artifacts.write_json("scenarios/fani-2019/surge.json", [
@@ -145,6 +148,11 @@ def test_live_digest_is_cached(client: TestClient, store: MemoryArtifacts) -> No
 
     store.write_json("manifests/2026/09/27/0615Z.json", {})
     assert client.get("/live").json()["run_at"] is None  # served from the cache until the TTL passes
+
+
+def test_roads(client: TestClient) -> None:
+    assert client.get("/scenarios/fani-2019/roads").json()["type"] == "FeatureCollection"
+    assert client.get("/scenarios/fani-2019").json()["roads"]["km_cut"] == 10
 
 
 def test_surge(client: TestClient) -> None:

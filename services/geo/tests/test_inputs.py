@@ -6,7 +6,14 @@ import pytest
 import respx
 
 from shadowcast_geo.config import IBTRACS_NI_CSV, OSDMA_SHELTERS_URL, OVERPASS_URLS, Region, Settings
-from shadowcast_geo.inputs import download, fetch_osdma_shelters, fetch_osm_assets, load_assets, load_best_track
+from shadowcast_geo.inputs import (
+    download,
+    fetch_osdma_shelters,
+    fetch_osm_assets,
+    fetch_osm_roads,
+    load_assets,
+    load_best_track,
+)
 
 REGION = Region("test", "Test coast", (19.0, 85.0, 21.0, 87.0), osdma_districts=("PURI", "GANJAM"))
 MIRRORS = ("https://mirror-a.test/x", "https://mirror-b.test/x")
@@ -185,3 +192,23 @@ def test_load_assets_empty_region(client: httpx.Client, settings: Settings, resp
 
     assert assets.empty
     assert list(assets.columns) == ["asset_id", "kind", "name", "source", "lat", "lon"]
+
+
+def test_fetch_osm_roads_keeps_ways_with_geometry(
+    client: httpx.Client, settings: Settings, respx_mock: respx.MockRouter
+) -> None:
+    elements = [
+        {"type": "way", "id": 7, "tags": {"highway": "trunk", "ref": "NH316", "name": "Puri-Konark Marine Drive"},
+         "geometry": [{"lat": 19.8, "lon": 85.8}, {"lat": 19.85, "lon": 85.9}]},
+        {"type": "way", "id": 8, "tags": {"highway": "primary", "name:en": "SH 13"},
+         "geometry": [{"lat": 20.0, "lon": 86.0}]},
+    ]  # fmt: skip
+    route = respx_mock.post(OVERPASS_URLS[0]).mock(return_value=httpx.Response(200, json={"elements": elements}))
+
+    roads = fetch_osm_roads(client, settings, REGION)
+
+    assert roads == [
+        {"road_id": "osm:way/7", "name": "Puri-Konark Marine Drive", "ref": "NH316", "highway": "trunk",
+         "coords": [[19.8, 85.8], [19.85, 85.9]]},
+    ]  # fmt: skip
+    assert "motorway%7Ctrunk%7Cprimary" in route.calls.last.request.content.decode()

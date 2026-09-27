@@ -109,6 +109,49 @@ describe("dutyBrief", () => {
     expect(wet(2).summary.endsWith("is modelled at 2 sites.")).toBe(true);
   });
 
+  it("adds a public-works action for the arterial roads that will be cut", () => {
+    const road = (name: string | null, ref: string | null, status: string, closes: string | null, km: number) => ({
+      type: "Feature" as const,
+      geometry: { type: "LineString" as const, coordinates: [] },
+      properties: {
+        road_id: `osm:way/${km}`,
+        name,
+        ref,
+        highway: "trunk",
+        length_km: km,
+        peak_wind_kt: 90,
+        flood_m: 0,
+        rain_mm: 0,
+        status,
+        causes: [],
+        closes_at: closes,
+      },
+    }); // fmt: skip
+    const roads = {
+      type: "FeatureCollection" as const,
+      features: [
+        road("NH-316", null, "cut", "2019-05-02T22:00:00Z", 12.4),
+        road(null, "SH13", "cut", "2019-05-02T20:00:00Z", 5),
+        road(null, null, "cut", null, 3),
+        road("Open road", null, "open", null, 40),
+      ],
+    } as Parameters<typeof dutyBrief>[0]["roads"];
+
+    const brief = dutyBrief({ ...fani, assets: [], timeMs: at("2019-05-02T13:00:00Z"), roads });
+
+    expect(brief.summary.endsWith("About 20 km of arterial road is likely to be cut; SH13 closes first.")).toBe(true);
+    expect(brief.actions).toEqual([
+      expect.objectContaining({ agency: "Public works", sites: 3, leadId: null, leadName: "SH13", hours: 7 }),
+    ]);
+    const unnamed = dutyBrief({
+      ...fani,
+      assets: [],
+      timeMs: at("2019-05-02T13:00:00Z"),
+      roads: { ...roads!, features: [roads!.features[2]] },
+    });
+    expect(unnamed.actions[0]).toMatchObject({ leadName: "an unnamed road", deadline: null });
+  });
+
   it("is all clear when no site is likely to be hit", () => {
     const brief = dutyBrief({ ...fani, assets: [assets[5]], timeMs: at("2019-05-02T13:00:00Z") });
 

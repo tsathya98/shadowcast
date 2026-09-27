@@ -69,6 +69,13 @@ EXTREME_RAIN_MM = 204.5  # IMD's "extremely heavy" rainfall threshold (24 h); us
 TRIGGER_SHARE = 0.25
 PAYOUT_TIERS_KT = ((64.0, 0.25), (83.0, 0.5), (96.0, 1.0))
 
+# Arterial roads (see roads.py): OSM classes kept, sampling step, and the winds that cut a road or put it at risk.
+ROAD_HIGHWAYS = ("motorway", "trunk", "primary")
+ROAD_SAMPLE_KM = 1.0
+ROAD_CUT_KT = 64.0  # hurricane force: IMD warns of uprooted trees and poles and disrupted road links
+ROAD_RISK_KT = 50.0  # storm force: tree branches and debris
+ACCESS_RADIUS_KM = 10.0  # a site further than this from an arterial road has no arterial access listed
+
 # Storm surge screening model (see surge.py).
 RHO_AIR = 1.15  # kg/m3, near-surface air in a tropical cyclone
 RHO_SEA = 1025.0  # kg/m3

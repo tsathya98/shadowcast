@@ -18,6 +18,7 @@ import type {
   LiveFeed,
   Page,
   ReplayMode,
+  RoadCollection,
   ScenarioDetail,
   SurgePoint,
   TrackFeatureCollection,
@@ -63,6 +64,15 @@ export function useAssetDetail(id: string, assetId: string | null) {
 export function useSurge(id: string, mode: ReplayMode) {
   return useSWR<SurgePoint[]>(
     mode.kind === "best-track" ? `${GEO_PREFIX}/scenarios/${id}/surge` : null,
+    fetchJson,
+    STATIC,
+  );
+}
+
+/** Arterial roads with their status and closing time; best-track replays only. */
+export function useRoads(id: string, mode: ReplayMode) {
+  return useSWR<RoadCollection>(
+    mode.kind === "best-track" ? `${GEO_PREFIX}/scenarios/${id}/roads` : null,
     fetchJson,
     STATIC,
   );

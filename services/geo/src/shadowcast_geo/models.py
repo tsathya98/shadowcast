@@ -86,6 +86,17 @@ class RainSummary(Schema):
     extreme_sites: int = Field(description="Assets with at least 204.5 mm of modelled rain (IMD extremely heavy)")
 
 
+class RoadSummary(Schema):
+    """Arterial roads through the storm (best track)."""
+
+    roads: int
+    km: int
+    km_cut: int = Field(description="Kilometres cut by surge water or hurricane-force winds")
+    km_at_risk: int
+    first_closure: str | None = Field(description="When the first cut road enters the 64-kt wind radius")
+    cut_by_surge: int = Field(description="Roads with at least 0.3 m of surge water")
+
+
 class SurgePoint(Schema):
     """Peak modelled surge at one open-coast point."""
 
@@ -107,6 +118,7 @@ class ScenarioDetail(ScenarioSummary):
     loss_by_band: list[dict[str, float]]
     surge: SurgeSummary
     rain: RainSummary
+    roads: RoadSummary
     insurance: dict[str, Any] = Field(description="Illustrative parametric terms and the trigger outcome per district")
     forecasts: list[ForecastSummary] = []
     built_at: str
@@ -136,6 +148,9 @@ class Asset(Schema):
     surge_m: float | None = Field(default=None, description="Peak modelled surge on that coast")
     flood_m: float | None = Field(default=None, description="Modelled surge water depth at the asset")
     rain_mm: float | None = Field(default=None, description="Modelled storm-total rain (R-CLIPER)")
+    road_km: float | None = Field(default=None, description="Distance to the nearest arterial road (best track only)")
+    access_road: str | None = None
+    access_closes: str | None = Field(default=None, description="When that road enters the 64-kt wind radius")
     observed_rain_mm: float | None = Field(default=None, description="Satellite-measured storm rain (best track only)")
     criticality: int
     p_outage: float

@@ -71,6 +71,7 @@ class LoadedScenario:
         lon: Asset longitudes in rank order.
         backtest: Backtest artifact.
         surge: Peak modelled surge along the open coast.
+        roads: Arterial roads with their status, as GeoJSON.
         evidence: Before/after satellite images (PNG) by name.
         forecasts: Ensemble forecast replays keyed by forecast key.
     """
@@ -84,6 +85,7 @@ class LoadedScenario:
     lon: NDArray[np.float64]
     backtest: dict[str, Any]
     surge: list[SurgePoint]
+    roads: dict[str, Any]
     evidence: dict[str, bytes]
     forecasts: dict[str, LoadedForecast]
 
@@ -157,6 +159,7 @@ def load_scenarios(store: ArtifactStore) -> dict[str, LoadedScenario]:
             lon=np.array([asset.lon for asset in assets]),
             backtest=store.read_json(f"{prefix}/backtest.json"),
             surge=[SurgePoint.model_validate(point) for point in store.read_json(f"{prefix}/surge.json")],
+            roads=store.read_json(f"{prefix}/roads.json"),
             evidence={name: store.read_bytes(f"{prefix}/evidence/{name}.png") for name in EVIDENCE_IMAGES},
             forecasts=forecasts,
         )
@@ -329,6 +332,12 @@ async def backtest(scenario: ScenarioDep) -> dict[str, Any]:
 async def surge(scenario: ScenarioDep) -> list[SurgePoint]:
     """Peak modelled storm surge at every open-coast point of the region (best track)."""
     return scenario.surge
+
+
+@router.get("/scenarios/{scenario_id}/roads")
+async def roads(scenario: ScenarioDep) -> dict[str, Any]:
+    """Arterial roads as GeoJSON LineStrings: status (cut, at risk, open), causes and when each closes (best track)."""
+    return scenario.roads
 
 
 @router.get("/scenarios/{scenario_id}/evidence/{name}.png", response_class=Response)

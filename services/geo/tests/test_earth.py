@@ -111,3 +111,17 @@ def test_relief_requests_the_region_plus_a_seaward_margin(ee: MagicMock) -> None
     assert request["grid"]["dimensions"] == {"width": 492, "height": 462}
     assert grid.cells.dtype == np.float64 and grid.cells[1, 1] == -80.0
     assert grid.cell_deg == pytest.approx(1 / 60)
+
+
+def test_reductions_are_batched_under_the_earth_engine_limit(ee: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(earth, "EE_POINTS_PER_REQUEST", 1)
+    elevation = ee.Image.return_value.rename.return_value.unmask.return_value
+    elevation.reduceRegions.return_value.getInfo.side_effect = [
+        {"features": [{"properties": {"i": 0, "mean": 2.0}}]},
+        {"features": [{"properties": {"i": 1, "mean": 7.0}}]},
+    ]
+
+    heights = earth.ground_elevation(POINTS)
+
+    assert heights.tolist() == [2.0, 7.0]
+    assert elevation.reduceRegions.call_count == 2

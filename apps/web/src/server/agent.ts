@@ -46,6 +46,7 @@ function toolAsset(asset: Asset | ForecastAsset, hindsight: boolean) {
     ...(hindsight && { observed_night_light_loss_pct: asset.observed_loss_pct }),
     ...(asset.flood_m != null && { surge_m: asset.surge_m, surge_water_m: asset.flood_m, coast_km: asset.coast_km }),
     district: asset.district,
+    ...(asset.access_road != null && { access_road: asset.access_road, access_road_closes: asset.access_closes }),
     storm_rain_mm: asset.rain_mm,
     ...("p_rain" in asset && { p_rain_204mm: asset.p_rain }),
     ...(hindsight && { satellite_rain_mm: asset.observed_rain_mm }),
@@ -80,6 +81,7 @@ function instructions(scenario: ScenarioDetail, context: AgentContext): string {
         : "") +
       `
 - Rain (${scenario.rain.model}): up to ${scenario.rain.max_modelled_mm} mm; against ${scenario.rain.truth} the rank correlation is ${scenario.rain.spearman?.toFixed(2) ?? "n/a"} and the model runs ${scenario.rain.median_ratio.toFixed(2)}x the satellite total.
+- Arterial roads: ${scenario.roads.km_cut} of ${scenario.roads.km} km likely cut by surge or hurricane-force winds; the first closes ${scenario.roads.first_closure ? utcAndIst(scenario.roads.first_closure) : "never"}. Each asset's access_road_closes is the deadline to move people or supplies along its route.
 - Parametric cover (${scenario.insurance.terms}): ${
         scenario.insurance.districts
           .filter((d) => d.payout_share > 0)

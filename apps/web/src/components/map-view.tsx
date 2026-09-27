@@ -16,7 +16,16 @@ import {
   type Rgb,
   SURGE_FULL_M,
 } from "@/lib/format";
-import type { Asset, ForecastAsset, Region, StormPosition, SurgePoint, TrackFeatureCollection } from "@/lib/types";
+import type {
+  Asset,
+  ForecastAsset,
+  Region,
+  RoadCollection,
+  RoadProperties,
+  StormPosition,
+  SurgePoint,
+  TrackFeatureCollection,
+} from "@/lib/types";
 
 type Path = { id: string; path: [number, number][] };
 
@@ -31,6 +40,9 @@ interface MapViewProps {
   storm: StormPosition | null;
   /** Peak modelled surge along the coast (best track only). */
   surge: SurgePoint[] | undefined;
+  /** Arterial roads with their status (best track only); a cut road turns amber once the replay passes its closure. */
+  roads: RoadCollection | undefined;
+  timeMs: number | null;
   selectedId: string | null;
   onSelect: (assetId: string | null) => void;
 }
@@ -151,7 +163,21 @@ function FitRegion({ region }: { region: Region }) {
 }
 
 export function MapView(props: MapViewProps) {
-  const { apiKey, region, assets, colorBy, windById, track, members, storm, surge, selectedId, onSelect } = props;
+  const {
+    apiKey,
+    region,
+    assets,
+    colorBy,
+    windById,
+    track,
+    members,
+    storm,
+    surge,
+    roads,
+    timeMs,
+    selectedId,
+    onSelect,
+  } = props;
 
   const layers = useMemo(() => {
     const assetLayer = new ScatterplotLayer<Asset | ForecastAsset>({
@@ -216,11 +242,33 @@ export function MapView(props: MapViewProps) {
       radiusUnits: "pixels",
       pickable: true,
     });
-    return [memberLayer, trackLayer, surgeLayer, assetLayer, stormLayer];
-  }, [assets, colorBy, windById, members, track, storm, surge, selectedId, onSelect]);
+    const closed = (road: RoadProperties) =>
+      road.status === "cut" && (road.closes_at == null || (timeMs ?? 0) >= Date.parse(road.closes_at));
+    const roadLayer = new PathLayer<RoadCollection["features"][number]>({
+      id: "roads",
+      data: roads?.features ?? [],
+      getPath: (f) => f.geometry.coordinates,
+      getColor: (f) =>
+        (closed(f.properties)
+          ? [...AMBER, 235]
+          : f.properties.status === "open"
+            ? [...WHITE, 40]
+            : [...WHITE, 110]) as [number, number, number, number],
+      getWidth: (f) => (closed(f.properties) ? 2.5 : 1.2),
+      widthUnits: "pixels",
+      pickable: true,
+      updateTriggers: { getColor: timeMs, getWidth: timeMs },
+    });
+    return [memberLayer, trackLayer, roadLayer, surgeLayer, assetLayer, stormLayer];
+  }, [assets, colorBy, windById, members, track, storm, surge, roads, timeMs, selectedId, onSelect]);
 
   const tooltip = useMemo(
     () => (info: PickingInfo) => {
+      if (info.object && info.layer?.id === "roads") {
+        const road = (info.object as RoadCollection["features"][number]).properties;
+        const causes = road.causes.length ? ` (${road.causes.join(", ")})` : "";
+        return `${road.name ?? road.ref ?? "Arterial road"} · ${road.status}${causes}\n${road.closes_at ? `closes ${istStamp(road.closes_at)}` : `peak wind ${Math.round(road.peak_wind_kt)} kt`}`;
+      }
       if (info.object && info.layer?.id === "surge") {
         const point = info.object as SurgePoint;
         return `Storm surge ${point.peak_m?.toFixed(1)} m · ${istStamp(point.peak_time)}

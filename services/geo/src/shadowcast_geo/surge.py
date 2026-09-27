@@ -233,7 +233,13 @@ def coastal_surge(coast: Coast, track: Track) -> dict[str, NDArray[Any]]:
 
 
 def inundation(
-    lat: FloatArray, lon: FloatArray, elevation_m: FloatArray, coast: Coast, peak_m: FloatArray
+    lat: FloatArray,
+    lon: FloatArray,
+    elevation_m: FloatArray,
+    *,
+    coast_lat: FloatArray,
+    coast_lon: FloatArray,
+    peak_m: FloatArray,
 ) -> dict[str, FloatArray]:
     """Carry each asset's nearest coastal surge inland and compare it with the ground.
 
@@ -241,7 +247,8 @@ def inundation(
         lat: Asset latitudes, shape ``(n_assets,)``.
         lon: Asset longitudes.
         elevation_m: Ground elevation per asset (metres above sea level; NaN if unknown).
-        coast: Open-coast points.
+        coast_lat: Open-coast point latitudes.
+        coast_lon: Open-coast point longitudes.
         peak_m: Peak surge per coast point (see :func:`coastal_surge`).
 
     Returns:
@@ -249,7 +256,7 @@ def inundation(
         ``flood_m`` (modelled water depth at the asset after decaying ``SURGE_DECAY_M_PER_KM`` inland; 0 when dry, NaN
         without elevation).
     """
-    distance, _ = geodesics(lat, lon, coast.lat, coast.lon)
+    distance, _ = geodesics(lat, lon, coast_lat, coast_lon)
     nearest = distance.argmin(axis=1)
     coast_km = distance[np.arange(lat.size), nearest]
     surge_m = np.nan_to_num(peak_m[nearest])
