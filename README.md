@@ -61,20 +61,20 @@ The console opens on the **Brief** tab: a **live** card with the cyclones GDACS 
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/fani-prioritise.png" alt="Prioritise tab at Fani landfall: cyclone shelters ranked by outage probability"></td>
+    <td width="50%"><img src="docs/images/fani-prioritise.png" alt="Prioritise tab at Fani landfall: cyclone shelters ranked by outage probability, arterial roads cut in amber, the modelled surge crest in blue along the coast"></td>
     <td width="50%"><img src="docs/images/dana-ensemble.png" alt="Cyclone Dana, ECMWF ensemble forecast issued 68 hours before landfall: member tracks and sites ranked by gale probability"></td>
   </tr>
   <tr>
-    <td align="center"><b>Prioritise</b> · Fani at landfall. Every site ranked, with outage probability, gale arrival, population served, elevation and reasons</td>
+    <td align="center"><b>Prioritise</b> · Fani at landfall. Every site ranked, with outage probability, gale arrival, surge, rain, access road and reasons; cut roads in amber</td>
     <td align="center"><b>As issued, T−68 h</b> · Dana 2024. 36 ECMWF members on the storm; 685 sites where at least half bring gales</td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/fani-prove.png" alt="Prove tab on Fani: ROC AUC 0.97, Brier 0.049, spatial holdout, light loss by wind band, predicted vs observed per substation"></td>
-    <td width="50%"><img src="docs/images/fani-replay.gif" alt="Animated replay of Cyclone Fani from 2 May 06:00 UTC to 3 May 06:00 UTC: alert cards fire as gales and hurricane-force winds reach named sites and the eye crosses the Odisha coast"></td>
+    <td width="50%"><img src="docs/images/fani-prove.png" alt="Prove tab on Fani: before and after VIIRS night-light images read by Gemini (Khordha, Puri and Cuttack totally dark, agrees with ShadowCast), storm rain vs NASA GPM rank correlation 0.72, and storm surge 2.3 m modelled vs 1.5 m reported by IMD"></td>
+    <td width="50%"><img src="docs/images/fani-replay.gif" alt="Animated replay of Cyclone Fani on the Brief tab from 2 May 06:00 UTC to 3 May 06:00 UTC: alert cards fire as gales and hurricane-force winds reach named sites, arterial roads turn amber as they close, and the eye crosses the Odisha coast"></td>
   </tr>
   <tr>
-    <td align="center"><b>Prove</b> · Fani backtest against VIIRS night lights: skill, spatial holdout, light loss by wind band, predicted vs observed per substation</td>
-    <td align="center"><b>Replay</b> · Fani, 2 May 06:00 → 3 May 06:00 UTC. Alerts fire as gales, then hurricane-force winds, reach named sites</td>
+    <td align="center"><b>Prove</b> · Fani. Gemini reads the before/after satellite images; rain is scored against NASA GPM and surge against IMD</td>
+    <td align="center"><b>Replay</b> · Fani, 2 May 06:00 → 3 May 06:00 UTC. Alerts fire as gales, then hurricane-force winds, reach named sites; roads turn amber as they close</td>
   </tr>
 </table>
 
