@@ -19,7 +19,9 @@ from shadowcast_geo.config import (
     GALE_KT,
     HOLLAND_B,
     KT_PER_MS,
+    MM_PER_H_PER_IN_PER_DAY,
     NM_TO_KM,
+    RCLIPER,
     WIND_BANDS_KT,
 )
 
@@ -145,6 +147,25 @@ def holland_wind(distance_km: FloatArray, vmax_kt: FloatArray, rmw_km: FloatArra
     return vmax_kt[None, :] * np.sqrt(x * np.exp(1.0 - x))
 
 
+def rcliper_rain(distance_km: FloatArray, vmax_kt: FloatArray) -> FloatArray:
+    """R-CLIPER symmetric rain rate: linear from the centre to ``rm``, then exponential decay (Tuleya et al. 2007).
+
+    ``T(r) = T0 + (Tm - T0) r / rm`` inside ``rm`` and ``Tm exp(-(r - rm) / re)`` beyond, where each parameter is
+    linear in the normalised intensity ``U = 1 + (Vmax - 35) / 33`` (knots).
+
+    Args:
+        distance_km: Distance from the storm centre, shape ``(n_assets, n_fixes)``.
+        vmax_kt: Maximum sustained wind per fix, shape ``(n_fixes,)``.
+
+    Returns:
+        FloatArray: Rain rate in mm/h, same shape as ``distance_km`` (0 where intensity is missing).
+    """
+    u = (1.0 + (np.nan_to_num(vmax_kt) - 35.0) / 33.0)[None, :]
+    t0, tm, rm, re = (a + b * u for a, b in (RCLIPER[k] for k in ("t0", "tm", "rm", "re")))
+    rate = np.where(distance_km < rm, t0 + (tm - t0) * distance_km / rm, tm * np.exp(-(distance_km - rm) / re))
+    return np.maximum(rate, 0.0) * MM_PER_H_PER_IN_PER_DAY
+
+
 def willoughby_rmw_km(vmax_kt: FloatArray, lat: FloatArray) -> FloatArray:
     """Radius of maximum wind estimated from intensity and latitude (Willoughby, Darling & Rahn 2006, eq. 7a).
 
@@ -174,8 +195,9 @@ def exposure(lat: FloatArray, lon: FloatArray, track: Track) -> dict[str, NDArra
 
     Returns:
         dict[str, NDArray[Any]]: ``peak_wind_kt``, ``peak_time``, ``min_dist_km``, ``closest_time``, ``band_kt``
-        (strongest band entered, 0 if none), ``band_entry`` (first time inside that band) and ``gale_arrival`` (first
-        time the modelled wind reaches ``GALE_KT``); missing times are NaT. Times are resolved on the densified track
+        (strongest band entered, 0 if none), ``band_entry`` (first time inside that band), ``gale_arrival`` (first
+        time the modelled wind reaches ``GALE_KT``) and ``rain_mm`` (storm-total R-CLIPER rain); missing times are
+        NaT. Times are resolved on the densified track
         (see :meth:`Track.densify`).
     """
     track = track.densify()
@@ -203,6 +225,7 @@ def exposure(lat: FloatArray, lon: FloatArray, track: Track) -> dict[str, NDArra
         "band_kt": band_kt,
         "band_entry": band_entry,
         "gale_arrival": np.where(gale.any(axis=1), track.times[gale.argmax(axis=1)], not_a_time),
+        "rain_mm": rcliper_rain(distance, track.vmax_kt).sum(axis=1) * DENSIFY_STEP_MINUTES / 60.0,
     }
 
 

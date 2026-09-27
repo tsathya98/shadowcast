@@ -14,7 +14,7 @@ import argparse
 import logging
 import math
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import httpx
@@ -23,13 +23,23 @@ import pandas as pd
 
 from shadowcast_geo import earth
 from shadowcast_geo.artifacts import ArtifactStore, artifact_store
-from shadowcast_geo.calibration import OutageModel, evaluate, fit_outage_model, loss_by_band, spatial_holdout
+from shadowcast_geo.calibration import (
+    OutageModel,
+    evaluate,
+    fit_outage_model,
+    loss_by_band,
+    spatial_holdout,
+    spearman,
+)
 from shadowcast_geo.config import (
+    EVIDENCE_IMAGES,
+    EXTREME_RAIN_MM,
     FLOOD_DEPTH_M,
     HOLDOUT_FOLDS,
     LIT_RADIANCE,
     LOSS_BANDS_KT,
     OUTAGE_LOSS_PCT,
+    RAINFALL_WINDOW_DAYS,
     SCENARIOS,
     USER_AGENT,
     Scenario,
@@ -37,7 +47,8 @@ from shadowcast_geo.config import (
 )
 from shadowcast_geo.ensemble import ensemble_impact, load_ensemble, select_storm
 from shadowcast_geo.hazard import Track, exposure, track_position
-from shadowcast_geo.inputs import load_assets, load_best_track
+from shadowcast_geo.inputs import download, load_assets, load_best_track
+from shadowcast_geo.insurance import best_track_triggers, forecast_triggers
 from shadowcast_geo.ranking import rank_assets
 from shadowcast_geo.surge import coast_from_grid, coastal_surge, inundation
 
@@ -63,9 +74,12 @@ ASSET_FIELDS = [
     "gale_arrival",
     "population",
     "elevation_m",
+    "district",
     "coast_km",
     "surge_m",
     "flood_m",
+    "rain_mm",
+    "observed_rain_mm",
     "criticality",
     "p_outage",
     "score",
@@ -74,14 +88,26 @@ ASSET_FIELDS = [
 ]
 SURGE_FIELDS = ["lat", "lon", "peak_m", "setup_m", "barometer_m", "peak_time"]
 # Surge is modelled on the best track only: a forecast replay must not carry hindsight.
-FORECAST_FIELDS = [f for f in ASSET_FIELDS if f not in ("coast_km", "surge_m", "flood_m")] + [
+FORECAST_FIELDS = [f for f in ASSET_FIELDS if f not in ("coast_km", "surge_m", "flood_m", "observed_rain_mm")] + [
+    "p_rain",
     "p34",
     "p64",
     "wind_p10",
     "wind_p90",
     "members",
 ]
-STATIC_FIELDS = ["asset_id", "kind", "name", "source", "lat", "lon", "population", "elevation_m", "observed_loss_pct"]
+STATIC_FIELDS = [
+    "asset_id",
+    "kind",
+    "name",
+    "source",
+    "lat",
+    "lon",
+    "district",
+    "population",
+    "elevation_m",
+    "observed_loss_pct",
+]
 ROUNDING = {
     "peak_wind_kt": 1,
     "min_dist_km": 1,
@@ -90,6 +116,9 @@ ROUNDING = {
     "coast_km": 1,
     "surge_m": 2,
     "flood_m": 2,
+    "rain_mm": 0,
+    "observed_rain_mm": 0,
+    "p_rain": 3,
     "peak_m": 2,
     "setup_m": 2,
     "barometer_m": 2,
@@ -176,7 +205,7 @@ def build_forecasts(
     summaries: list[dict[str, Any]] = []
     for issued in scenario.forecasts:
         storm = select_storm(load_ensemble(client, settings, issued), target)
-        impact = ensemble_impact(lat, lon, storm, model)
+        impact, member_peak = ensemble_impact(lat, lon, storm, model)
         no_band_entry = pd.Series(pd.NaT, index=static.index, dtype="datetime64[s]")
         frame = static.assign(**impact, band_kt=0, band_entry=no_band_entry, members=len(storm.members))
         ranked = rank_assets(frame, model, scenario.landfall, reference_bands, issued)
@@ -195,6 +224,7 @@ def build_forecasts(
                     "assets_likely_gale": int((ranked["p34"] >= 0.5).sum()),
                     "assets_likely_hurricane": int((ranked["p64"] >= 0.5).sum()),
                     "max_p_outage": float(ranked["p_outage"].max()),
+                    "districts": forecast_triggers(static["district"], member_peak),
                     "source": "ECMWF IFS ensemble tropical-cyclone tracks, as issued (open data, CC BY 4.0)",
                 }
             )
@@ -269,11 +299,28 @@ def build_scenario(
     track = Track.from_records(fixes)
     assets = load_assets(client, settings, scenario.region)
     lat, lon = assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float)
-    assets = earth.enrich(assets.assign(**exposure(lat, lon, track)))
+    assets = earth.enrich(assets.assign(**exposure(lat, lon, track), district=earth.districts(assets)))
     assets, surge_points, surge = model_surge(scenario, track, assets)
+    window = timedelta(days=RAINFALL_WINDOW_DAYS)
+    assets["observed_rain_mm"] = earth.observed_rain(assets, scenario.landfall - window, scenario.landfall + window)
+    modelled_rain, measured_rain = (
+        assets["rain_mm"].to_numpy(dtype=float),
+        assets["observed_rain_mm"].to_numpy(dtype=float),
+    )
+    measured = np.isfinite(measured_rain)
+    rain = {
+        "model": "R-CLIPER parametric rain (Tuleya et al. 2007) along the best track",
+        "truth": f"NASA GPM IMERG V07, {RAINFALL_WINDOW_DAYS} days either side of landfall",
+        "n": int(measured.sum()),
+        "spearman": spearman(modelled_rain[measured], measured_rain[measured]),
+        "median_ratio": float(np.median(modelled_rain[measured] / np.maximum(measured_rain[measured], 1.0))),
+        "max_modelled_mm": round(float(modelled_rain.max()), 0),
+        "max_observed_mm": round(float(np.nanmax(measured_rain)), 0),
+        "extreme_sites": int((modelled_rain >= EXTREME_RAIN_MM).sum()),
+    }
 
     substations = assets[assets["kind"] == "substation"]
-    truth = substations[["asset_id", "lat", "lon", "peak_wind_kt"]].join(
+    truth = substations[["asset_id", "lat", "lon", "district", "peak_wind_kt"]].join(
         earth.nightlight_loss(substations, scenario.truth_pre, scenario.truth_post)
     )
     truth["lit"] = truth["ntl_pre"] >= LIT_RADIANCE
@@ -328,6 +375,12 @@ def build_scenario(
             "skill": skill,
             "loss_by_band": bands,
             "surge": surge,
+            "rain": rain,
+            "insurance": {
+                "terms": "Illustrative: index = wind reached at 25% of a district's sites; "
+                "pays 25/50/100% at 64/83/96 kt",
+                "districts": best_track_triggers(assets, lit, pd.Timestamp(scenario.landfall)),
+            },
             "forecasts": forecasts,
             "built_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
@@ -337,6 +390,10 @@ def build_scenario(
     store.write_json(f"{prefix}/track.json", fixes)
     store.write_json(f"{prefix}/assets.json", frame_records(ranked, ASSET_FIELDS))
     store.write_json(f"{prefix}/surge.json", frame_records(surge_points, SURGE_FIELDS))
+    urls = earth.nightlight_image_urls(scenario.region.bbox, scenario.truth_pre, scenario.truth_post)
+    for name, url in zip(EVIDENCE_IMAGES, urls, strict=True):
+        image = download(client, settings, f"{scenario.id}-{name}.png", (url,))
+        store.write_bytes(f"{prefix}/evidence/{name}.png", image, "image/png")
     store.write_json(
         f"{prefix}/backtest.json",
         {

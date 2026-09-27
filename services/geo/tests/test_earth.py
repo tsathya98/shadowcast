@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -42,6 +42,19 @@ def test_enrich_adds_population_and_elevation(ee: MagicMock) -> None:
     ee.Geometry.Point.return_value.buffer.assert_called_with(2000)
 
 
+def test_nightlight_images_share_one_scale(ee: MagicMock) -> None:
+    median = ee.ImageCollection.return_value.map.return_value.filterDate.return_value.median.return_value
+    median.visualize.return_value.getThumbURL.return_value = "https://earthengine.test/thumb.png"
+
+    urls = earth.nightlight_image_urls(
+        (19.0, 84.4, 21.7, 87.6), (date(2019, 4, 20), date(2019, 5, 2)), (date(2019, 5, 4), date(2019, 5, 11))
+    )
+
+    assert urls == ("https://earthengine.test/thumb.png", "https://earthengine.test/thumb.png")
+    ee.Geometry.Rectangle.assert_called_once_with([84.4, 19.0, 87.6, 21.7])
+    assert median.visualize.call_args.kwargs["max"] == 30.0
+
+
 def test_nightlight_loss(ee: MagicMock) -> None:
     window = ee.ImageCollection.return_value.map.return_value.filterDate.return_value.median.return_value
     stacked = window.rename.return_value.addBands.return_value
@@ -61,6 +74,30 @@ def test_nightlight_loss(ee: MagicMock) -> None:
     high_quality(image)
     image.select.assert_any_call("Mandatory_Quality_Flag")
     image.select.return_value.lte.assert_called_once_with(1)
+
+
+def test_districts_joins_each_point_to_its_adm2(ee: MagicMock) -> None:
+    joined = ee.Join.saveFirst.return_value.apply.return_value
+    joined.getInfo.return_value = {
+        "features": [{"properties": {"i": 0, "district": {"properties": {"shapeName": "Puri"}}}}]
+    }
+
+    names = earth.districts(POINTS)
+
+    ee.Join.saveFirst.assert_called_once_with("district")
+    assert names.tolist() == ["Puri", None] and names.index.tolist() == [10, 11]
+
+
+def test_observed_rain_sums_half_hourly_imerg(ee: MagicMock) -> None:
+    total = ee.ImageCollection.return_value.filterDate.return_value.select.return_value.sum.return_value
+    image = total.multiply.return_value.rename.return_value
+    image.reduceRegions.return_value.getInfo.return_value = _features({"mean": 212.0}, {"mean": None})
+
+    rain = earth.observed_rain(POINTS, datetime(2019, 4, 30, tzinfo=UTC), datetime(2019, 5, 6, tzinfo=UTC))
+
+    total.multiply.assert_called_once_with(0.5)
+    assert rain.index.tolist() == [10, 11]
+    assert rain.iloc[0] == 212.0 and np.isnan(rain.iloc[1])
 
 
 def test_relief_requests_the_region_plus_a_seaward_margin(ee: MagicMock) -> None:

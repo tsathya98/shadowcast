@@ -128,10 +128,13 @@ def test_ensemble_impact_aggregates_members(model: OutageModel) -> None:
     storm = StormForecast("70B", ISSUED, members)
     lat, lon = np.array([19.5, 19.5]), np.array([86.4, 89.5])
 
-    impact = ensemble_impact(lat, lon, storm, model)
+    impact, member_peak = ensemble_impact(lat, lon, storm, model)
 
     assert impact["p34"].tolist() == [0.5, 0.0]
+    assert member_peak.shape == (4, 2)
     assert impact["p64"].tolist() == [0.5, 0.0]
+    assert impact["rain_mm"][0] > impact["rain_mm"][1]
+    assert 0.0 <= impact["p_rain"][0] <= 1.0
     assert 0.2 < impact["p_outage"][0] < 0.3
     assert impact["wind_p10"][0] < impact["peak_wind_kt"][0] < impact["wind_p90"][0]
     # Median over the members that reach gales: 12:00 (120 kt member) and 13:45 (70 kt member).

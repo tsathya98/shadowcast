@@ -9,6 +9,7 @@ set -euo pipefail
 PROJECT="${PROJECT:-argmax-cyclone-2026}"
 REGION="${REGION:-asia-south1}"
 BUCKET="${BUCKET:-${PROJECT}-scenarios}"
+ARCHIVE_BUCKET="${ARCHIVE_BUCKET:-${PROJECT}-archive}"
 SERVICE="${SERVICE:-shadowcast-geo}"
 ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-*}"
 SA_NAME="shadowcast-geo"
@@ -30,9 +31,11 @@ echo "==> Service account ${SA}"
 if ! "${GCLOUD[@]}" iam service-accounts describe "${SA}" >/dev/null 2>&1; then
   "${GCLOUD[@]}" iam service-accounts create "${SA_NAME}" --display-name="ShadowCast geo API"
 fi
-# Least privilege: the API only reads built artifacts.
-"${GCLOUD[@]}" storage buckets add-iam-policy-binding "gs://${BUCKET}" \
-  --member="serviceAccount:${SA}" --role="roles/storage.objectViewer" >/dev/null
+# Least privilege: the API only reads built artifacts and the feed archive (for the live picture).
+for bucket in "${BUCKET}" "${ARCHIVE_BUCKET}"; do
+  "${GCLOUD[@]}" storage buckets add-iam-policy-binding "gs://${bucket}" \
+    --member="serviceAccount:${SA}" --role="roles/storage.objectViewer" >/dev/null
+done
 
 echo "==> Cloud Run service ${SERVICE} (${REGION})"
 # Public, read-only endpoints serving data derived from public sources; instance count capped to bound cost.
@@ -40,7 +43,7 @@ echo "==> Cloud Run service ${SERVICE} (${REGION})"
   --source="${ROOT}/services/geo" \
   --region="${REGION}" \
   --service-account="${SA}" \
-  --set-env-vars="^|^GEO_BUCKET=${BUCKET}|GEO_ALLOWED_ORIGINS=${ALLOWED_ORIGINS}" \
+  --set-env-vars="^|^GEO_BUCKET=${BUCKET}|GEO_ARCHIVE_BUCKET=${ARCHIVE_BUCKET}|GEO_ALLOWED_ORIGINS=${ALLOWED_ORIGINS}" \
   --allow-unauthenticated --cpu=1 --memory=1Gi --min-instances=0 --max-instances=3 --concurrency=40
 
 URL="$("${GCLOUD[@]}" run services describe "${SERVICE}" --region="${REGION}" --format='value(status.url)')"

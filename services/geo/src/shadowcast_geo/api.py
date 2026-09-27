@@ -6,6 +6,8 @@ storage; on-demand hazard is a small vectorised numpy computation.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -13,15 +15,16 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 
 import numpy as np
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
-from shadowcast_geo.artifacts import ArtifactStore, artifact_store
-from shadowcast_geo.config import Settings
+from shadowcast_geo.artifacts import ArtifactStore, GcsArtifacts, artifact_store
+from shadowcast_geo.config import EVIDENCE_IMAGES, Settings
 from shadowcast_geo.hazard import Track, track_position, wind_at, wind_timeline
+from shadowcast_geo.live import ArchiveReader, digest
 from shadowcast_geo.models import (
     Asset,
     AssetDetail,
@@ -30,6 +33,7 @@ from shadowcast_geo.models import (
     ForecastAssetPage,
     ForecastSummary,
     HazardSnapshot,
+    LiveFeed,
     ScenarioDetail,
     ScenarioSummary,
     StormPosition,
@@ -67,6 +71,7 @@ class LoadedScenario:
         lon: Asset longitudes in rank order.
         backtest: Backtest artifact.
         surge: Peak modelled surge along the open coast.
+        evidence: Before/after satellite images (PNG) by name.
         forecasts: Ensemble forecast replays keyed by forecast key.
     """
 
@@ -79,6 +84,7 @@ class LoadedScenario:
     lon: NDArray[np.float64]
     backtest: dict[str, Any]
     surge: list[SurgePoint]
+    evidence: dict[str, bytes]
     forecasts: dict[str, LoadedForecast]
 
 
@@ -151,6 +157,7 @@ def load_scenarios(store: ArtifactStore) -> dict[str, LoadedScenario]:
             lon=np.array([asset.lon for asset in assets]),
             backtest=store.read_json(f"{prefix}/backtest.json"),
             surge=[SurgePoint.model_validate(point) for point in store.read_json(f"{prefix}/surge.json")],
+            evidence={name: store.read_bytes(f"{prefix}/evidence/{name}.png") for name in EVIDENCE_IMAGES},
             forecasts=forecasts,
         )
     return loaded
@@ -218,6 +225,29 @@ router = APIRouter()
 async def health(scenarios: Annotated[dict[str, LoadedScenario], Depends(loaded_scenarios)]) -> dict[str, Any]:
     """Liveness probe listing the scenarios loaded in memory."""
     return {"status": "ok", "scenarios": sorted(scenarios)}
+
+
+@dataclass
+class LiveCache:
+    """The live digest and when it was read; one reader at a time refreshes it."""
+
+    archive: ArchiveReader
+    ttl_s: float
+    feed: LiveFeed | None = None
+    read_at: float = 0.0
+    lock: asyncio.Lock | None = None
+
+
+@router.get("/live")
+async def live(request: Request) -> LiveFeed:
+    """Active cyclones (GDACS) and official warnings (NDMA SACHET), from the feed archiver's newest run."""
+    cache = cast("LiveCache", request.app.state.live)
+    cache.lock = cache.lock or asyncio.Lock()
+    async with cache.lock:
+        if cache.feed is None or time.monotonic() - cache.read_at > cache.ttl_s:
+            cache.feed = LiveFeed.model_validate(await asyncio.to_thread(digest, cache.archive))
+            cache.read_at = time.monotonic()
+    return cache.feed
 
 
 @router.get("/scenarios")
@@ -301,6 +331,14 @@ async def surge(scenario: ScenarioDep) -> list[SurgePoint]:
     return scenario.surge
 
 
+@router.get("/scenarios/{scenario_id}/evidence/{name}.png", response_class=Response)
+async def evidence(scenario: ScenarioDep, name: str) -> Response:
+    """Satellite night lights over the region before (``night-lights-pre``) or after (``night-lights-post``)."""
+    if name not in scenario.evidence:
+        raise HTTPException(status_code=404, detail=f"unknown image {name!r}")
+    return Response(scenario.evidence[name], media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @router.get("/scenarios/{scenario_id}/forecasts")
 async def forecasts(scenario: ScenarioDep) -> list[ForecastSummary]:
     """As-issued ECMWF ensemble forecasts replayed for this scenario, in issue order."""
@@ -332,12 +370,15 @@ async def forecast_assets(forecast: ForecastDep, query: AssetQueryDep) -> Foreca
     return ForecastAssetPage(total=total, items=items)
 
 
-def create_app(settings: Settings | None = None, store: ArtifactStore | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, store: ArtifactStore | None = None, archive: ArchiveReader | None = None
+) -> FastAPI:
     """Build the FastAPI application.
 
     Args:
         settings: Settings (defaults to the environment).
         store: Artifact store (defaults to the one selected by ``settings``).
+        archive: Feed archive for the live picture (defaults to ``settings.archive_bucket``).
 
     Returns:
         FastAPI: The configured application.
@@ -347,6 +388,7 @@ def create_app(settings: Settings | None = None, store: ArtifactStore | None = N
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.scenarios = load_scenarios(store or artifact_store(settings))
+        app.state.live = LiveCache(archive or GcsArtifacts(settings.archive_bucket), settings.live_ttl_s)
         yield
 
     app = FastAPI(

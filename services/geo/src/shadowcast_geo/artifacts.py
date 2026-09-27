@@ -7,6 +7,8 @@ Layout::
     scenarios/{id}/track.json            storm track fixes
     scenarios/{id}/assets.json           ranked assets with hazard, probability and reasons
     scenarios/{id}/backtest.json         per-substation predicted vs observed night-light loss
+    scenarios/{id}/surge.json            peak modelled surge per open-coast point
+    scenarios/{id}/evidence/*.png        before/after satellite images of the region
     models/outage.json                   calibrated outage model
 """
 
@@ -21,7 +23,28 @@ from shadowcast_geo.config import Settings
 
 
 class ArtifactStore(Protocol):
-    """Reads and writes JSON artifacts by relative path."""
+    """Reads and writes artifacts (JSON documents and images) by relative path."""
+
+    def read_bytes(self, path: str) -> bytes:
+        """Read one object.
+
+        Args:
+            path: Artifact path relative to the store root.
+
+        Returns:
+            bytes: The object's bytes.
+        """
+        ...
+
+    def write_bytes(self, path: str, body: bytes, content_type: str) -> None:
+        """Write one object.
+
+        Args:
+            path: Artifact path relative to the store root.
+            body: Object bytes.
+            content_type: MIME type.
+        """
+        ...
 
     def read_json(self, path: str) -> Any:
         """Read one JSON document.
@@ -67,6 +90,40 @@ class GcsArtifacts:
         """
         self._bucket = (client or storage.Client()).bucket(bucket)
 
+    def read_bytes(self, path: str) -> bytes:
+        """Download one object.
+
+        Args:
+            path: Object name.
+
+        Returns:
+            bytes: The object's bytes.
+        """
+        return self._bucket.blob(path).download_as_bytes()
+
+    def write_bytes(self, path: str, body: bytes, content_type: str) -> None:
+        """Upload one object.
+
+        Args:
+            path: Object name.
+            body: Object bytes.
+            content_type: MIME type stored with the object.
+        """
+        # google-cloud-storage ships incomplete type hints for upload_from_string's optional parameters.
+        self._bucket.blob(path).upload_from_string(body, content_type=content_type)  # pyright: ignore[reportUnknownMemberType]
+
+    def names(self, prefix: str) -> list[str]:
+        """Object names under a prefix.
+
+        Args:
+            prefix: Name prefix.
+
+        Returns:
+            list[str]: Matching object names.
+        """
+        # google-cloud-storage leaves list_blobs untyped.
+        return [str(blob.name) for blob in self._bucket.list_blobs(prefix=prefix)]  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+
     def read_json(self, path: str) -> Any:
         """Download and decode one JSON object.
 
@@ -76,18 +133,16 @@ class GcsArtifacts:
         Returns:
             Any: The decoded JSON value.
         """
-        return json.loads(self._bucket.blob(path).download_as_bytes())
+        return json.loads(self.read_bytes(path))
 
     def write_json(self, path: str, data: Any) -> None:
-        """Encode and upload one JSON object.
+        """Encode (strict JSON, UTF-8) and upload one JSON object.
 
         Args:
             path: Object name.
             data: JSON-serialisable value.
         """
-        body = json.dumps(data, ensure_ascii=False, allow_nan=False)
-        # google-cloud-storage ships incomplete type hints for upload_from_string's optional parameters.
-        self._bucket.blob(path).upload_from_string(body, content_type="application/json")  # pyright: ignore[reportUnknownMemberType]
+        self.write_bytes(path, json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json")
 
     def exists(self, path: str) -> bool:
         """Whether an object exists in the bucket.

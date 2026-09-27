@@ -24,8 +24,17 @@ IMD_REPORTS = "https://rsmcnewdelhi.imd.gov.in/uploads/report/26"  # RSMC New De
 NIGHT_LIGHTS = "NASA/VIIRS/002/VNP46A2"
 NIGHT_LIGHTS_BAND = "DNB_BRDF_Corrected_NTL"  # raw radiance; the gap-filled band hides post-storm blackouts
 NIGHT_LIGHTS_QUALITY_BAND = "Mandatory_Quality_Flag"  # 0/1 = high-quality retrieval
+NIGHT_LIGHTS_DISPLAY_MAX = 30.0  # nW/cm2/sr at full brightness in the evidence images
+NIGHT_LIGHTS_PALETTE = ["0e1012", "f28a2e", "ffe2b0"]  # the console's void to amber
+NIGHT_LIGHTS_IMAGE_PX = 900
+EVIDENCE_IMAGES = ("night-lights-pre", "night-lights-post")
 POPULATION = "WorldPop/GP/100m/pop"
 POPULATION_YEAR = 2020
+RAINFALL = "NASA/GPM_L3/IMERG_V07"  # half-hourly satellite precipitation (mm/h), the rainfall truth
+RAINFALL_BAND = "precipitation"
+RAINFALL_SCALE_M = 11132  # IMERG's native 0.1 degree
+RAINFALL_WINDOW_DAYS = 3  # storm totals are taken from this many days before landfall to as many after
+DISTRICTS = "projects/sat-io/open-datasets/geoboundaries/CGAZ_ADM2"  # geoBoundaries ADM2, CC BY 4.0
 ELEVATION = "COPERNICUS/DEM/GLO30_2024_1"  # a surface model: reads roofs and canopy, used only inland
 # Bare-earth coastal terrain (Pronk et al. 2024, CC BY 4.0), so surge is compared with the ground, not the rooftops.
 COASTAL_DTM = "projects/sat-io/open-datasets/DELTARES/deltadtm_v1"
@@ -48,6 +57,17 @@ OUTAGE_LOSS_PCT = 50.0  # an asset "lost power" when its night-light radiance fe
 HOLDOUT_FOLDS = 5  # spatial cross-validation blocks along the reference coast
 LOW_LYING_M = 5.0
 LOSS_BANDS_KT = (0, 60, 80, 100, 130)
+
+# R-CLIPER parametric rain rate (Tuleya et al. 2007, the NHC defaults as bias-adjusted): each parameter is a + b * U
+# with U = 1 + (Vmax - 35 kt) / 33; rates in inches/day, radii in km.
+RCLIPER = {"t0": (-1.10, 3.96), "tm": (-1.60, 4.80), "rm": (64.5, -13.0), "re": (150.0, -16.0)}
+MM_PER_H_PER_IN_PER_DAY = 25.4 / 24
+EXTREME_RAIN_MM = 204.5  # IMD's "extremely heavy" rainfall threshold (24 h); used here for storm totals
+
+# Illustrative parametric cover (see insurance.py): the index is the wind reached at this share of a district's sites,
+# and payouts step up at the Saffir-Simpson category 1-3 thresholds.
+TRIGGER_SHARE = 0.25
+PAYOUT_TIERS_KT = ((64.0, 0.25), (83.0, 0.5), (96.0, 1.0))
 
 # Storm surge screening model (see surge.py).
 RHO_AIR = 1.15  # kg/m3, near-surface air in a tropical cyclone
@@ -291,6 +311,8 @@ class Settings:
         max_attempts: Attempts per download before giving up.
         retry_backoff_s: Base delay for exponential backoff between attempts.
         allowed_origins: CORS origins allowed to call the API.
+        archive_bucket: GCS bucket the feed archiver writes to (read for the live picture).
+        live_ttl_s: How long the live digest is served before the archive is read again.
     """
 
     bucket: str = "argmax-cyclone-2026-scenarios"
@@ -300,6 +322,8 @@ class Settings:
     max_attempts: int = 3
     retry_backoff_s: float = 5.0
     allowed_origins: tuple[str, ...] = ("*",)
+    archive_bucket: str = "argmax-cyclone-2026-archive"
+    live_ttl_s: float = 900.0
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -321,4 +345,5 @@ class Settings:
             max_attempts=int(env.get("GEO_MAX_ATTEMPTS", cls.max_attempts)),
             retry_backoff_s=float(env.get("GEO_RETRY_BACKOFF_S", cls.retry_backoff_s)),
             allowed_origins=tuple(o.strip() for o in origins.split(",")) if origins else cls.allowed_origins,
+            archive_bucket=env.get("GEO_ARCHIVE_BUCKET") or cls.archive_bucket,
         )

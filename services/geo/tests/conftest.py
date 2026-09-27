@@ -23,13 +23,22 @@ class MemoryArtifacts:
     """In-memory stand-in for the scenario bucket, with the same strict-JSON round trip."""
 
     def __init__(self) -> None:
-        self.objects: dict[str, str] = {}
+        self.objects: dict[str, bytes] = {}
+
+    def read_bytes(self, path: str) -> bytes:
+        return self.objects[path]
+
+    def write_bytes(self, path: str, body: bytes, content_type: str) -> None:
+        self.objects[path] = body
+
+    def names(self, prefix: str) -> list[str]:
+        return sorted(name for name in self.objects if name.startswith(prefix))
 
     def read_json(self, path: str) -> Any:
         return json.loads(self.objects[path])
 
     def write_json(self, path: str, data: Any) -> None:
-        self.objects[path] = json.dumps(data, ensure_ascii=False, allow_nan=False)
+        self.objects[path] = json.dumps(data, ensure_ascii=False, allow_nan=False).encode()
 
     def exists(self, path: str) -> bool:
         return path in self.objects

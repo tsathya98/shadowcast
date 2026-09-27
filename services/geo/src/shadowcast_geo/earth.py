@@ -6,8 +6,8 @@ server-side requests regardless of asset count.
 
 from __future__ import annotations
 
-from datetime import date
-from typing import Any
+from datetime import date, datetime
+from typing import Any, cast
 
 import ee
 import numpy as np
@@ -18,14 +18,21 @@ from shadowcast_geo.config import (
     BATHYMETRY_BAND,
     BATHYMETRY_MARGIN_DEG,
     COASTAL_DTM,
+    DISTRICTS,
     ELEVATION,
     NIGHT_LIGHTS,
     NIGHT_LIGHTS_BAND,
+    NIGHT_LIGHTS_DISPLAY_MAX,
+    NIGHT_LIGHTS_IMAGE_PX,
+    NIGHT_LIGHTS_PALETTE,
     NIGHT_LIGHTS_QUALITY_BAND,
     NIGHT_LIGHTS_RADIUS_M,
     POPULATION,
     POPULATION_RADIUS_M,
     POPULATION_YEAR,
+    RAINFALL,
+    RAINFALL_BAND,
+    RAINFALL_SCALE_M,
 )
 from shadowcast_geo.surge import Grid
 
@@ -96,11 +103,53 @@ def enrich(assets: pd.DataFrame) -> pd.DataFrame:
     return enriched.astype({"population": float, "elevation_m": float})
 
 
+def _nightlight_windows(pre: tuple[date, date], post: tuple[date, date]) -> tuple[Any, Any]:
+    """Median high-quality VIIRS radiance before and after the storm.
+
+    Uses VNP46A2 raw BRDF-corrected radiance masked to high-quality retrievals. The gap-filled band is not used: it
+    carries pre-storm values into cloudy post-landfall nights and hides blackouts.
+
+    Args:
+        pre: ``(start, end)`` of the pre-storm window (end exclusive).
+        post: ``(start, end)`` of the post-landfall window (end exclusive).
+
+    Returns:
+        tuple[Any, Any]: The pre- and post-storm median images.
+    """
+
+    def high_quality(image: Any) -> Any:
+        return image.select(NIGHT_LIGHTS_BAND).updateMask(image.select(NIGHT_LIGHTS_QUALITY_BAND).lte(1))
+
+    collection = ee.ImageCollection(NIGHT_LIGHTS).map(high_quality)
+    before, after = (collection.filterDate(start.isoformat(), end.isoformat()).median() for start, end in (pre, post))
+    return before, after
+
+
+def nightlight_image_urls(
+    bbox: tuple[float, float, float, float], pre: tuple[date, date], post: tuple[date, date]
+) -> tuple[str, str]:
+    """PNG renderings of the region's night lights before and after the storm, on one shared scale.
+
+    Args:
+        bbox: ``(south, west, north, east)`` of the region.
+        pre: Pre-storm window.
+        post: Post-landfall window.
+
+    Returns:
+        tuple[str, str]: Short-lived Earth Engine thumbnail URLs for the before and after images.
+    """
+    south, west, north, east = bbox
+    region = ee.Geometry.Rectangle([west, south, east, north])
+    return tuple(  # pyright: ignore[reportReturnType]
+        image.visualize(min=0, max=NIGHT_LIGHTS_DISPLAY_MAX, palette=NIGHT_LIGHTS_PALETTE).getThumbURL(
+            {"region": region, "dimensions": NIGHT_LIGHTS_IMAGE_PX, "format": "png"}
+        )
+        for image in _nightlight_windows(pre, post)
+    )
+
+
 def nightlight_loss(points: pd.DataFrame, pre: tuple[date, date], post: tuple[date, date]) -> pd.DataFrame:
     """Observed night-light radiance before and after a storm around each point, and the percentage lost.
-
-    Uses VIIRS VNP46A2 raw BRDF-corrected radiance masked to high-quality retrievals. The gap-filled band is not
-    used: it carries pre-storm values into cloudy post-landfall nights and hides blackouts.
 
     Args:
         points: Frame with ``lat`` and ``lon``.
@@ -111,15 +160,10 @@ def nightlight_loss(points: pd.DataFrame, pre: tuple[date, date], post: tuple[da
         pd.DataFrame: Same index as ``points`` with ``ntl_pre``, ``ntl_post`` (nW/cm2/sr, window medians averaged
         over a ``NIGHT_LIGHTS_RADIUS_M`` buffer) and ``loss_pct``.
     """
-
-    def high_quality(image: Any) -> Any:
-        return image.select(NIGHT_LIGHTS_BAND).updateMask(image.select(NIGHT_LIGHTS_QUALITY_BAND).lte(1))
-
-    collection = ee.ImageCollection(NIGHT_LIGHTS).map(high_quality)
-    window = [collection.filterDate(start.isoformat(), end.isoformat()).median() for start, end in (pre, post)]
+    before, after = _nightlight_windows(pre, post)
     stats = _reduce(
         points,
-        window[0].rename("pre").addBands(window[1].rename("post")),
+        before.rename("pre").addBands(after.rename("post")),
         ee.Reducer.mean(),
         500,
         NIGHT_LIGHTS_RADIUS_M,
@@ -134,6 +178,57 @@ def nightlight_loss(points: pd.DataFrame, pre: tuple[date, date], post: tuple[da
     )
     frame["loss_pct"] = 100.0 * (1.0 - frame["ntl_post"] / frame["ntl_pre"])
     return frame
+
+
+def districts(points: pd.DataFrame) -> pd.Series:
+    """The district (geoBoundaries ADM2) each point falls in, joined server-side in one request.
+
+    Args:
+        points: Frame with ``lat`` and ``lon``.
+
+    Returns:
+        pd.Series: District name per point, same index (``None`` offshore or outside every district).
+    """
+    features = ee.FeatureCollection(
+        [
+            ee.Feature(ee.Geometry.Point([lon, lat]), {"i": i})
+            for i, (lat, lon) in enumerate(zip(points["lat"], points["lon"], strict=True))
+        ]
+    )
+    joined = ee.Join.saveFirst("district").apply(
+        features, ee.FeatureCollection(DISTRICTS), ee.Filter.intersects(leftField=".geo", rightField=".geo")
+    )
+    result = cast("dict[str, list[dict[str, Any]]]", joined.getInfo())
+    names = {
+        int(f["properties"]["i"]): str(f["properties"]["district"]["properties"]["shapeName"])
+        for f in result["features"]
+    }
+    return pd.Series([names.get(i) for i in range(len(points))], index=points.index, dtype=object)
+
+
+def observed_rain(points: pd.DataFrame, start: datetime, end: datetime) -> pd.Series:
+    """Satellite storm-total rainfall at each point: NASA GPM IMERG, summed over half-hourly rates.
+
+    Args:
+        points: Frame with ``lat`` and ``lon``.
+        start: Window start (UTC).
+        end: Window end (UTC, exclusive).
+
+    Returns:
+        pd.Series: Rain in mm per point, same index as ``points`` (NaN where IMERG has no data).
+    """
+    total = (
+        ee.ImageCollection(RAINFALL)
+        .filterDate(start.isoformat(), end.isoformat())
+        .select(RAINFALL_BAND)
+        .sum()
+        .multiply(0.5)  # mm/h over half-hour steps
+        .rename("rain")
+    )
+    stats = _reduce(points, total, ee.Reducer.mean(), RAINFALL_SCALE_M)
+    return pd.Series(
+        [stats.get(i, {}).get("mean", np.nan) for i in range(len(points))], index=points.index, dtype=float
+    )
 
 
 def relief(bbox: tuple[float, float, float, float]) -> Grid:

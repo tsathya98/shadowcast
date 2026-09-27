@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from shadowcast_geo.calibration import OutageModel
-from shadowcast_geo.config import CRITICALITY, FLOOD_DEPTH_M, LOW_LYING_M
+from shadowcast_geo.config import CRITICALITY, EXTREME_RAIN_MM, FLOOD_DEPTH_M, LOW_LYING_M
 
 NOTABLE_LOSS_PCT = 10.0  # below this, night-to-night variability dominates the backtest median
 
@@ -133,6 +133,13 @@ def _reasons(
         reasons.append(
             f"Gales (34 kt) arrive from {arrival:%d %b %H:%M} UTC ({after_issue}{before_landfall:+.0f} h to landfall)"
         )
+    rain, measured = row.get("rain_mm"), row.get("observed_rain_mm")
+    if rain is not None and np.isfinite(rain):
+        satellite = f"; NASA GPM measured {measured:.0f} mm" if measured is not None and np.isfinite(measured) else ""
+        members = (
+            f" ({row['p_rain']:.0%} of members bring at least {EXTREME_RAIN_MM:.0f} mm)" if "p_rain" in row else ""
+        )
+        reasons.append(f"Storm rain modelled at {rain:.0f} mm (R-CLIPER){members}{satellite}")
     population = row.get("population")
     if population is not None and np.isfinite(population) and population > 0:
         reasons.append(f"About {population:,.0f} people live within 2 km")

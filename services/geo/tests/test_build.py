@@ -51,6 +51,19 @@ def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> MemoryArtifacts
     def enrich(points: pd.DataFrame) -> pd.DataFrame:
         return points.assign(population=1500.0, elevation_m=4.0)
 
+    def night_light_images(bbox: object, pre: object, post: object) -> tuple[str, str]:
+        return "https://ee.test/pre", "https://ee.test/post"
+
+    def fetch_image(_client: object, _settings: object, cache_name: str, urls: tuple[str, ...]) -> bytes:
+        return f"{cache_name}:{urls[0]}".encode()
+
+    def districts(points: pd.DataFrame) -> pd.Series:
+        return pd.Series(["Puri"] * (len(points) - 1) + [None], index=points.index, dtype=object)
+
+    def observed_rain(points: pd.DataFrame, start: datetime, end: datetime) -> pd.Series:
+        assert end - start == timedelta(days=6)
+        return pd.Series(np.linspace(80.0, 160.0, len(points)), index=points.index)
+
     def relief(bbox: tuple[float, float, float, float]) -> Grid:
         return east_facing_coast(coast_lon=(bbox[1] + bbox[3]) / 2)  # a coast through the middle of every region
 
@@ -64,6 +77,10 @@ def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> MemoryArtifacts
     monkeypatch.setattr(build.earth, "enrich", enrich)
     monkeypatch.setattr(build.earth, "nightlight_loss", nightlights)
     monkeypatch.setattr(build.earth, "relief", relief)
+    monkeypatch.setattr(build.earth, "observed_rain", observed_rain)
+    monkeypatch.setattr(build.earth, "districts", districts)
+    monkeypatch.setattr(build.earth, "nightlight_image_urls", night_light_images)
+    monkeypatch.setattr(build, "download", fetch_image)
     store = MemoryArtifacts()
 
     def artifact_store(_settings: Settings) -> MemoryArtifacts:
@@ -98,6 +115,7 @@ def test_main_builds_every_scenario(pipeline: MemoryArtifacts) -> None:
     assert {"p34", "p64", "wind_p10", "wind_p90", "members", "gale_arrival"} <= set(forecast_assets[0])
     assert forecast_assets[0]["members"] == 4
     assert "flood_m" not in forecast_assets[0]  # no hindsight surge in a forecast replay
+    assert "observed_rain_mm" not in forecast_assets[0] and "p_rain" in forecast_assets[0]
     tracks = pipeline.read_json("scenarios/dana-2024/forecasts/20241022T00Z/tracks.json")
     assert [t["member"] for t in tracks] == [1, 2, 3, 4]
 
@@ -115,7 +133,16 @@ def test_build_output_satisfies_api_schemas(pipeline: MemoryArtifacts) -> None:
     assets: list[dict[str, Any]] = pipeline.read_json("scenarios/fani-2019/assets.json")
     assert [a["rank"] for a in assets] == list(range(1, 10))
     assert assets[0]["peak_time"].endswith("Z")
-    assert {"coast_km", "surge_m", "flood_m"} <= set(assets[0])
+    assert {"coast_km", "surge_m", "flood_m", "rain_mm", "observed_rain_mm"} <= set(assets[0])
+    rain = pipeline.read_json("scenarios/fani-2019/scenario.json")["rain"]
+    assert rain["n"] == 9 and rain["max_observed_mm"] == 160.0 and rain["spearman"] is not None
+    image = pipeline.read_bytes("scenarios/fani-2019/evidence/night-lights-post.png")
+    assert image == b"fani-2019-night-lights-post.png:https://ee.test/post"
+    insurance = pipeline.read_json("scenarios/fani-2019/scenario.json")["insurance"]
+    assert [d["district"] for d in insurance["districts"]] == ["Puri"]
+    assert insurance["districts"][0]["lit_substations"] == 8
+    dana = pipeline.read_json("scenarios/dana-2024/scenario.json")
+    assert dana["forecasts"][0]["districts"][0]["district"] == "Puri"
     surge = pipeline.read_json("scenarios/fani-2019/surge.json")
     summary = pipeline.read_json("scenarios/fani-2019/scenario.json")["surge"]
     assert len(surge) == summary["coast_points"] > 0

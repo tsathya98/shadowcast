@@ -9,6 +9,7 @@ from shadowcast_geo.hazard import (
     geodesics,
     holland_wind,
     radii_to_km,
+    rcliper_rain,
     track_position,
     willoughby_rmw_km,
     wind_at,
@@ -117,6 +118,24 @@ def test_wind_at(track: Track) -> None:
     assert inside[0] > 90  # eyewall
     assert inside[1] < 20  # ~600 km away
     assert outside.tolist() == [0.0, 0.0]
+
+
+def test_rcliper_rain_profile() -> None:
+    distance = np.array([[0.0, 30.0, 300.0, 30.0]])
+
+    rate = rcliper_rain(distance, np.array([100.0, 100.0, 100.0, np.nan]))
+
+    # 100 kt: U = 2.97; T0 = 10.66 and Tm = 12.66 in/day, rm = 25.9 km, re = 102.5 km.
+    assert rate[0, 0] == pytest.approx(10.66 * 25.4 / 24, rel=0.01)
+    assert rate[0, 1] == pytest.approx(12.66 * np.exp(-(30 - 25.89) / 102.48) * 25.4 / 24, rel=0.01)
+    assert rate[0, 2] < rate[0, 1]
+    assert rate[0, 3] == 0.0  # missing intensity rains nothing
+
+
+def test_exposure_accumulates_storm_rain(track: Track) -> None:
+    rain = exposure(np.array([19.5, 19.5]), np.array([86.05, 88.5]), track)["rain_mm"]
+
+    assert rain[0] > rain[1] > 0
 
 
 def test_willoughby_rmw_km() -> None:

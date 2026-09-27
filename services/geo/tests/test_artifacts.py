@@ -18,10 +18,16 @@ def test_gcs_read_write_exists() -> None:
 
     client.bucket.assert_called_once_with("scenarios-bucket")
     blob.upload_from_string.assert_called_once_with(
-        json.dumps([{"id": "dana-2024", "storm": "Dana ବାତ୍ୟା"}], ensure_ascii=False), content_type="application/json"
+        json.dumps([{"id": "dana-2024", "storm": "Dana ବାତ୍ୟା"}], ensure_ascii=False).encode(),
+        content_type="application/json",
     )
     assert store.read_json("scenarios/index.json") == {"id": "dana-2024"}
     assert store.exists("scenarios/index.json") is True
+    listed = MagicMock()
+    listed.name = "manifests/2026/09/27/0615Z.json"
+    client.bucket.return_value.list_blobs.return_value = [listed]
+    assert store.names("manifests/") == ["manifests/2026/09/27/0615Z.json"]
+    client.bucket.return_value.list_blobs.assert_called_once_with(prefix="manifests/")
 
 
 def test_gcs_rejects_non_finite_numbers() -> None:

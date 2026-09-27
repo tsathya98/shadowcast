@@ -18,7 +18,15 @@ import numpy as np
 from numpy.typing import NDArray
 
 from shadowcast_geo.calibration import OutageModel
-from shadowcast_geo.config import ECMWF_OPEN_DATA, ECMWF_TRACK_STEPS, ENSEMBLE_MATCH_KM, GALE_KT, KT_PER_MS, Settings
+from shadowcast_geo.config import (
+    ECMWF_OPEN_DATA,
+    ECMWF_TRACK_STEPS,
+    ENSEMBLE_MATCH_KM,
+    EXTREME_RAIN_MM,
+    GALE_KT,
+    KT_PER_MS,
+    Settings,
+)
 from shadowcast_geo.hazard import Track, exposure, geodesics, willoughby_rmw_km
 from shadowcast_geo.inputs import download
 
@@ -192,7 +200,7 @@ def select_storm(forecasts: list[StormForecast], target: tuple[float, float]) ->
 
 def ensemble_impact(
     lat: FloatArray, lon: FloatArray, storm: StormForecast, model: OutageModel
-) -> dict[str, NDArray[Any]]:
+) -> tuple[dict[str, NDArray[Any]], FloatArray]:
     """Run the hazard for every member and aggregate impact probabilities per asset.
 
     Args:
@@ -202,16 +210,19 @@ def ensemble_impact(
         model: Calibrated outage model applied to each member's peak wind.
 
     Returns:
-        dict[str, NDArray[Any]]: Per asset: ``p_outage`` (member mean), ``p34`` and ``p64`` (share of members
-        reaching gale / hurricane force), ``wind_p10``/``peak_wind_kt``/``wind_p90`` (peak-wind percentiles),
-        ``min_dist_km`` (median closest approach), and the median ``closest_time``, ``peak_time`` and ``gale_arrival``
-        (over members where defined; NaT otherwise).
+        tuple[dict[str, NDArray[Any]], FloatArray]: Per asset: ``p_outage`` (member mean), ``p34`` and ``p64``
+        (share of members reaching gale / hurricane force), ``wind_p10``/``peak_wind_kt``/``wind_p90`` (peak-wind
+        percentiles), ``min_dist_km`` (median closest approach), the median ``closest_time``, ``peak_time`` and
+        ``gale_arrival`` (over members where defined; NaT otherwise), ``rain_mm`` (member median storm rain) and
+        ``p_rain`` (share of members bringing at least ``EXTREME_RAIN_MM``); and every member's peak wind per
+        asset, shaped ``(n_members, n_assets)``, for district-level scoring.
     """
     results = [exposure(lat, lon, Track.from_records(fixes)) for fixes in storm.members.values()]
     peak = np.vstack([r["peak_wind_kt"] for r in results])  # (members, assets)
     reached = np.nan_to_num(peak, nan=0.0)  # a member that never reaches an asset contributes calm (0 kt)
     p10, p50, p90 = np.percentile(reached, [10, 50, 90], axis=0)
-    return {
+    rain = np.vstack([r["rain_mm"] for r in results])
+    impact = {
         "p_outage": model.predict(peak).mean(axis=0),
         "p34": (reached >= GALE_KT).mean(axis=0),
         "p64": (reached >= 64.0).mean(axis=0),
@@ -222,7 +233,10 @@ def ensemble_impact(
         "closest_time": _median_time(np.vstack([r["closest_time"] for r in results])),
         "peak_time": _median_time(np.vstack([r["peak_time"] for r in results])),
         "gale_arrival": _median_time(np.vstack([r["gale_arrival"] for r in results])),
+        "rain_mm": np.median(rain, axis=0),
+        "p_rain": (rain >= EXTREME_RAIN_MM).mean(axis=0),
     }
+    return impact, peak
 
 
 def _median_time(times: NDArray[np.datetime64]) -> NDArray[np.datetime64]:

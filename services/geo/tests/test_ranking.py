@@ -58,7 +58,7 @@ def test_reasons_cover_every_signal(model: OutageModel) -> None:
 def test_surge_reason_replaces_low_lying(model: OutageModel) -> None:
     frame = _frame(
         elevation_m=[0.4, 12.0, np.nan, 1.0], coast_km=[2.0] * 4, surge_m=[1.8] * 4, flood_m=[1.1, 0.0, np.nan, 0.0]
-    )
+    ).assign(rain_mm=[240.0, 0.0, 0.0, 0.0], observed_rain_mm=[310.0, np.nan, np.nan, np.nan])
 
     ranked = rank_assets(frame, model, LANDFALL, BANDS)
     school = ranked.loc[ranked["asset_id"] == "a", "reasons"].iloc[0]
@@ -67,6 +67,7 @@ def test_surge_reason_replaces_low_lying(model: OutageModel) -> None:
         "Storm surge: modelled 1.8 m on the coast 2 km away leaves about 1.1 m of water here (ground 0.4 m)" in school
     )
     assert not any(r.startswith("Low-lying") for r in school)
+    assert "Storm rain modelled at 240 mm (R-CLIPER); NASA GPM measured 310 mm" in school
 
 
 def test_rank_without_population_or_band_match(model: OutageModel) -> None:
@@ -95,6 +96,8 @@ def test_ensemble_forecast_ranking_and_reasons(model: OutageModel) -> None:
         wind_p90=[55.0] * 4,
         members=[52] * 4,
         gale_arrival=np.array(["2019-05-02T21:00:00", "NaT", "NaT", "NaT"], dtype="datetime64[s]"),
+        rain_mm=[120.0] * 4,
+        p_rain=[0.25] * 4,
     )
 
     ranked = rank_assets(frame, model, LANDFALL, BANDS, issued=ISSUED)
