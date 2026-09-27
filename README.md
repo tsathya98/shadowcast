@@ -29,9 +29,9 @@
 
 <br>
 
-<a href="https://shadowcast-two.vercel.app"><img width="100%" src="docs/images/fani-brief.png" alt="The ShadowCast console on Cyclone Fani, 20 hours before landfall: 917 sites likely to lose power, recommended actions per agency, and incoming gale alerts"></a>
+<a href="https://shadowcast-two.vercel.app"><img width="100%" src="docs/images/fani-brief.png" alt="The ShadowCast console on Cyclone Fani, 2 hours before landfall: arterial roads turning amber as they close, the surge band on the coast, hurricane-force alerts at named sites, and the Brief with IMD's bulletin read by Gemini and live NDMA warnings"></a>
 
-<sub>Cyclone Fani (2019), 20 h before landfall. The Brief tab: 917 sites likely to lose power, what each agency should do before gales reach its first site, and the officer audit trail.</sub>
+<sub>Cyclone Fani (2019), 2 h before landfall. Amber roads have become unsafe; the blue band is the modelled surge crest. The Brief shows IMD's own bulletin as Gemini read it from the PDF, today's live NDMA warnings for Odisha, and what each agency must do before its deadline.</sub>
 
 </div>
 
