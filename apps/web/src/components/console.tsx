@@ -8,6 +8,7 @@ import { useCallback, useMemo, useState } from "react";
 import { AssetDetail } from "@/components/asset-detail";
 import { AssetList } from "@/components/asset-list";
 import { BacktestPanel } from "@/components/backtest-panel";
+import { BriefPanel } from "@/components/brief-panel";
 import { LiveAlerts } from "@/components/live-alerts";
 import { PreparePanel } from "@/components/prepare-panel";
 import { ReplayStrip } from "@/components/replay-strip";
@@ -15,6 +16,7 @@ import { Timeline } from "@/components/timeline";
 import { useAssets, useForecastTracks, useHazard, useScenario, useTrack } from "@/lib/api";
 import { LANGUAGES, REGION_LANGUAGE } from "@/lib/advisory";
 import { liveAlerts } from "@/lib/alerts";
+import { dutyBrief } from "@/lib/brief";
 import { type ColorBy, compactNumber, kindLabel, rgbCss, riskColor } from "@/lib/format";
 import type { ReplayMode, ScenarioSummary } from "@/lib/types";
 
@@ -31,7 +33,7 @@ const LEGENDS: Record<ColorBy, string> = {
   wind: "Modelled wind now",
 };
 const COLOR_LABELS: Record<ColorBy, string> = { risk: "Outage", gales: "Gales", wind: "Wind now" };
-const TABS = ["prioritise", "prepare", "prove"] as const;
+const TABS = ["brief", "prioritise", "prepare", "prove"] as const;
 
 interface ConsoleProps {
   scenarios: ScenarioSummary[];
@@ -53,7 +55,7 @@ function Readout({ label, value, unit }: { label: string; value: string; unit?: 
 export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   const [scenarioId, setScenarioId] = useState(scenarios[0].id);
   const [mode, setMode] = useState<ReplayMode>({ kind: "best-track" });
-  const [tab, setTab] = useState<(typeof TABS)[number]>("prioritise");
+  const [tab, setTab] = useState<(typeof TABS)[number]>("brief");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [colorBy, setColorBy] = useState<ColorBy>("risk");
   const [scrub, setScrub] = useState<{ scenarioId: string; ms: number } | null>(null);
@@ -99,6 +101,19 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
           })
         : [],
     [assets, timeMs, scenario, hazard],
+  );
+  const brief = useMemo(
+    () =>
+      scenario && timeMs != null
+        ? dutyBrief({
+            assets,
+            timeMs,
+            storm: scenario.storm,
+            region: scenario.region.name,
+            landfall: scenario.landfall,
+          })
+        : null,
+    [assets, timeMs, scenario],
   );
 
   const changeScenario = (id: string) => {
@@ -285,7 +300,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
               role="tab"
               aria-selected={tab === name}
               onClick={() => setTab(name)}
-              className="segment flex-1 !py-2"
+              className="segment flex-1 !px-1 !py-2 !tracking-[0.08em]"
             >
               {name}
             </button>
@@ -301,7 +316,15 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
           />
         </div>
         <div className={clsx("min-h-0 flex-1 flex-col pt-2", tab === "prepare" ? "hidden" : "flex")}>
-          {tab === "prove" && scenario ? (
+          {tab === "brief" && brief ? (
+            <BriefPanel
+              scenarioId={scenarioId}
+              brief={brief}
+              onOpenAsset={openAsset}
+              onShowPriorities={() => setTab("prioritise")}
+              onDraftAdvisory={() => setTab("prepare")}
+            />
+          ) : tab === "prove" && scenario ? (
             <BacktestPanel scenario={scenario} />
           ) : selected ? (
             <AssetDetail scenarioId={scenarioId} asset={selected} onBack={() => setSelectedId(null)} />

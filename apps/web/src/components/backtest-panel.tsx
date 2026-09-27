@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { Tile } from "@/components/tile";
 import { useBacktest } from "@/lib/api";
 import { percent } from "@/lib/format";
 import type { ScenarioDetail } from "@/lib/types";
@@ -23,16 +24,6 @@ const TOOLTIP_STYLE = {
   fontSize: 12,
 };
 const AXIS_TICK = { fontSize: 11, fill: "var(--text-muted)", fontFamily: "var(--font-geist-mono)" };
-
-function Tile({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-3.5 py-3">
-      <div className="label">{label}</div>
-      <div className="readout mt-1 text-2xl text-[var(--text-primary)]">{value}</div>
-      <div className="mt-0.5 text-xs text-[var(--text-secondary)]">{hint}</div>
-    </div>
-  );
-}
 
 /** "Prove": how well modelled wind predicted observed night-light loss after landfall. */
 export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {

@@ -7,7 +7,7 @@ import { createVertex } from "@ai-sdk/google-vertex";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { type ExternalAccountClientOptions, ExternalAccountClient } from "google-auth-library";
 
-import type { Advisory } from "@/lib/advisory";
+import type { Advisory, AdvisorySummary } from "@/lib/advisory";
 
 const PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? "argmax-cyclone-2026";
 const PROVIDER = process.env.GCP_WORKLOAD_IDENTITY_PROVIDER; // projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
@@ -41,7 +41,7 @@ const advisories = new Firestore({
 const ALREADY_EXISTS = 6; // gRPC status code
 
 export interface AdvisoryRecord {
-  status: "issued" | "rejected";
+  status: AdvisorySummary["status"];
   scenarioId: string;
   /** "best-track" or the forecast key the officer was replaying. */
   replay: string;
@@ -61,6 +61,30 @@ export async function recordDecision(toolCallId: string, record: AdvisoryRecord)
   } catch (error) {
     if ((error as { code?: number }).code !== ALREADY_EXISTS) throw error;
   }
+}
+
+const SCAN_LIMIT = 100;
+
+/**
+ * The latest decisions for one scenario, newest first. Filters on the scenario alone (served by Firestore's automatic
+ * single-field index) and sorts the small result here, so no composite index is needed.
+ */
+export async function listAdvisories(scenarioId: string, limit: number): Promise<AdvisorySummary[]> {
+  const snapshot = await advisories.where("scenarioId", "==", scenarioId).limit(SCAN_LIMIT).get();
+  return snapshot.docs
+    .map((doc) => {
+      const record = doc.data() as AdvisoryRecord;
+      const info = record.advisory.infos.find((i) => i.language === "en") ?? record.advisory.infos[0];
+      return {
+        id: doc.id,
+        status: record.status,
+        replay: record.replay,
+        headline: info.headline,
+        decidedAt: record.decidedAt,
+      };
+    })
+    .sort((a, b) => b.decidedAt.localeCompare(a.decidedAt))
+    .slice(0, limit);
 }
 
 /** An audited advisory by id, or null when there is none. */

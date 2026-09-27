@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * Data hooks for the geo API. Requests go through the `/api/geo` rewrite (see next.config.ts), so the browser only
- * talks to this origin and the API location stays server-side configuration.
+ * Data hooks for the geo API and the advisory audit log. Geo requests go through the `/api/geo` rewrite (see
+ * next.config.ts), so the browser only talks to this origin and the API location stays server-side configuration.
  */
 import useSWR, { type SWRConfiguration } from "swr";
 
+import type { AdvisorySummary } from "./advisory";
 import type {
   Asset,
   AssetDetail,
@@ -20,9 +21,9 @@ import type {
 
 export const GEO_PREFIX = "/api/geo";
 
-/** Fetch JSON from the geo API, raising with the server's message on non-2xx responses. */
-export async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${GEO_PREFIX}${path}`);
+/** Fetch JSON from this origin, raising with the server's message on non-2xx responses. */
+export async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
   }
@@ -32,36 +33,45 @@ export async function fetchJson<T>(path: string): Promise<T> {
 const STATIC: SWRConfiguration = { revalidateOnFocus: false, revalidateIfStale: false, dedupingInterval: 60_000 };
 
 export function useScenario(id: string) {
-  return useSWR<ScenarioDetail>(`/scenarios/${id}`, fetchJson, STATIC);
+  return useSWR<ScenarioDetail>(`${GEO_PREFIX}/scenarios/${id}`, fetchJson, STATIC);
 }
 
 export function useTrack(id: string) {
-  return useSWR<TrackFeatureCollection>(`/scenarios/${id}/track`, fetchJson, STATIC);
+  return useSWR<TrackFeatureCollection>(`${GEO_PREFIX}/scenarios/${id}/track`, fetchJson, STATIC);
 }
 
 /** Every asset in rank order for the selected replay (the full list feeds the map; ~250 kB gzipped). */
 export function useAssets(id: string, mode: ReplayMode) {
-  const path = mode.kind === "forecast" ? `/scenarios/${id}/forecasts/${mode.key}/assets` : `/scenarios/${id}/assets`;
+  const path = `${GEO_PREFIX}/scenarios/${id}${mode.kind === "forecast" ? `/forecasts/${mode.key}` : ""}/assets`;
   return useSWR<Page<Asset | ForecastAsset>>(`${path}?limit=5000`, fetchJson, { ...STATIC, keepPreviousData: true });
 }
 
 export function useForecastTracks(id: string, mode: ReplayMode) {
-  const key = mode.kind === "forecast" ? `/scenarios/${id}/forecasts/${mode.key}/tracks` : null;
+  const key = mode.kind === "forecast" ? `${GEO_PREFIX}/scenarios/${id}/forecasts/${mode.key}/tracks` : null;
   return useSWR<TrackFeatureCollection>(key, fetchJson, STATIC);
 }
 
 export function useAssetDetail(id: string, assetId: string | null) {
-  return useSWR<AssetDetail>(assetId ? `/scenarios/${id}/assets/${assetId}` : null, fetchJson, STATIC);
+  return useSWR<AssetDetail>(assetId ? `${GEO_PREFIX}/scenarios/${id}/assets/${assetId}` : null, fetchJson, STATIC);
 }
 
 export function useBacktest(id: string) {
-  return useSWR<Backtest>(`/scenarios/${id}/backtest`, fetchJson, STATIC);
+  return useSWR<Backtest>(`${GEO_PREFIX}/scenarios/${id}/backtest`, fetchJson, STATIC);
 }
 
 /** Wind at every asset at one moment; `at` should be quantised by the caller so scrubbing reuses cached snapshots. */
 export function useHazard(id: string, at: string | null) {
-  return useSWR<HazardSnapshot>(at ? `/scenarios/${id}/hazard?at=${encodeURIComponent(at)}` : null, fetchJson, {
-    ...STATIC,
-    keepPreviousData: true,
-  });
+  return useSWR<HazardSnapshot>(
+    at ? `${GEO_PREFIX}/scenarios/${id}/hazard?at=${encodeURIComponent(at)}` : null,
+    fetchJson,
+    {
+      ...STATIC,
+      keepPreviousData: true,
+    },
+  );
+}
+
+/** The latest officer decisions for a scenario; revalidated whenever the brief mounts, so a new decision shows up. */
+export function useAdvisories(scenarioId: string) {
+  return useSWR<AdvisorySummary[]>(`/api/advisories?scenario=${scenarioId}`, fetchJson);
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assetName,
   assetValue,
   compactNumber,
   istStamp,
@@ -24,6 +25,11 @@ describe("labels and numbers", () => {
     ["new_kind", "new kind"],
   ])("kindLabel(%s)", (kind, expected) => {
     expect(kindLabel(kind)).toBe(expected);
+  });
+
+  it("names assets, falling back to their kind", () => {
+    expect(assetName({ name: "Puri 132 kV", kind: "substation" })).toBe("Puri 132 kV");
+    expect(assetName({ name: null, kind: "health_centre" })).toBe("Unnamed health centre");
   });
 
   it("formats percent, knots and compact numbers, with a dash for missing values", () => {

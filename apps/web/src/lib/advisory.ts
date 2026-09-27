@@ -60,6 +60,16 @@ export const advisorySchema = z.object({
 
 export type Advisory = z.infer<typeof advisorySchema>;
 
+/** An officer's audited decision as the brief lists it: what was decided, without the full CAP message. */
+export interface AdvisorySummary {
+  id: string;
+  status: "issued" | "rejected";
+  /** "best-track" or the forecast key the officer was replaying. */
+  replay: string;
+  headline: string;
+  decidedAt: string;
+}
+
 export interface CapEnvelope {
   identifier: string;
   sent: string;

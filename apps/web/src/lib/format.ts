@@ -28,6 +28,11 @@ export function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? kind.replaceAll("_", " ");
 }
 
+/** An asset's display name, falling back to its kind for unnamed OSM features ("Unnamed hospital"). */
+export function assetName(asset: Pick<Asset, "name" | "kind">): string {
+  return asset.name ?? `Unnamed ${kindLabel(asset.kind).toLowerCase()}`;
+}
+
 export function percent(value: number | null | undefined, digits = 0): string {
   return value == null || Number.isNaN(value) ? "–" : `${(value * 100).toFixed(digits)}%`;
 }

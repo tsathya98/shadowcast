@@ -3,7 +3,7 @@
  * the ranked priority assets (when gales and hurricane-force winds reach them) and the storm's landfall, so every
  * alert carries the model's own numbers.
  */
-import { kindLabel, percent } from "./format";
+import { assetName, kindLabel, percent } from "./format";
 import type { Asset, ForecastAsset } from "./types";
 
 type Hazard = "gales" | "hurricane";
@@ -67,7 +67,7 @@ function arrivalGroups(assets: (Asset | ForecastAsset)[]): Group[] {
 
 function describe({ ms, hazard, members }: Group, timeMs: number): LiveAlert {
   const lead = members.find((a) => a.name) ?? members[0];
-  const name = `${lead.name ?? `Unnamed ${kindLabel(lead.kind).toLowerCase()}`}${members.length > 1 ? ` + ${members.length - 1} more` : ""}`;
+  const name = `${assetName(lead)}${members.length > 1 ? ` + ${members.length - 1} more` : ""}`;
   const now = ms <= timeMs;
   const hours = Math.max(1, Math.round((ms - timeMs) / HOUR_MS));
   return {

@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { Area, AreaChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { useAssetDetail } from "@/lib/api";
-import { compactNumber, istStamp, kindLabel, knots, percent, utcAndIst } from "@/lib/format";
+import { assetName, compactNumber, istStamp, kindLabel, knots, percent, utcAndIst } from "@/lib/format";
 import type { Asset, ForecastAsset } from "@/lib/types";
 
 interface AssetDetailProps {
@@ -104,7 +104,7 @@ export function AssetDetail({ scenarioId, asset, onBack }: AssetDetailProps) {
         Rank {String(asset.rank).padStart(2, "0")} · {kindLabel(asset.kind)}
       </div>
       <h2 className="mt-1 text-xl leading-tight font-semibold tracking-tight text-[var(--text-primary)]">
-        {asset.name ?? `Unnamed ${kindLabel(asset.kind).toLowerCase()}`}
+        {assetName(asset)}
       </h2>
       <div className="mt-0.5 text-xs text-[var(--text-muted)]">{asset.source}</div>
 

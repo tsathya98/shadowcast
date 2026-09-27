@@ -3,7 +3,7 @@
 import { clsx } from "clsx";
 import { useMemo, useState } from "react";
 
-import { assetValue, type ColorBy, kindLabel, percent, rgbCss, riskColor } from "@/lib/format";
+import { assetName, assetValue, type ColorBy, kindLabel, percent, rgbCss, riskColor } from "@/lib/format";
 import type { Asset, ForecastAsset } from "@/lib/types";
 
 interface AssetListProps {
@@ -66,9 +66,7 @@ export function AssetList({ assets, colorBy, selectedId, onSelect }: AssetListPr
               >
                 <span className="readout text-xs text-[var(--text-muted)]">{String(asset.rank).padStart(2, "0")}</span>
                 <span className="min-w-0">
-                  <span className="block truncate text-sm text-[var(--text-primary)]">
-                    {asset.name ?? `Unnamed ${kindLabel(asset.kind).toLowerCase()}`}
-                  </span>
+                  <span className="block truncate text-sm text-[var(--text-primary)]">{assetName(asset)}</span>
                   <span className="label mt-0.5 block !tracking-[0.1em]">
                     {kindLabel(asset.kind)}
                     {forecast ? ` · gales ${percent((asset as ForecastAsset).p34)}` : ""}
