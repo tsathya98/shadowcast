@@ -1,6 +1,7 @@
 /**
- * Google Cloud clients for the server: Gemini on Vertex AI and the Firestore audit log. Locally they use Application
- * Default Credentials (gcloud); on Vercel they use Workload Identity Federation, with no service-account key anywhere.
+ * Google Cloud clients for the server: Gemini on Vertex AI, the Firestore audit log and the cache of bulletin readings.
+ * Locally they use Application Default Credentials (gcloud); on Vercel they use Workload Identity Federation, with no
+ * service-account key anywhere.
  */
 import { Firestore } from "@google-cloud/firestore";
 import { createVertex } from "@ai-sdk/google-vertex";
@@ -8,6 +9,7 @@ import { getVercelOidcToken } from "@vercel/oidc";
 import { type ExternalAccountClientOptions, ExternalAccountClient } from "google-auth-library";
 
 import type { Advisory, AdvisorySummary } from "@/lib/advisory";
+import type { Bulletin } from "@/lib/bulletin";
 
 const PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? "argmax-cyclone-2026";
 const PROVIDER = process.env.GCP_WORKLOAD_IDENTITY_PROVIDER; // projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
@@ -26,6 +28,8 @@ const federated: ExternalAccountClientOptions | undefined =
       }
     : undefined;
 
+export const GEMINI_MODEL = "gemini-3.8-flash";
+
 /** Gemini 3.x models are served only from the global Vertex AI endpoint. */
 export const vertex = createVertex({
   project: PROJECT,
@@ -33,12 +37,23 @@ export const vertex = createVertex({
   googleAuthOptions: federated && { credentials: federated },
 });
 
-const advisories = new Firestore({
+const firestore = new Firestore({
   projectId: PROJECT,
   ...(federated && { authClient: ExternalAccountClient.fromJSON(federated) }),
-}).collection("advisories");
+});
+const advisories = firestore.collection("advisories");
+const bulletins = firestore.collection("bulletins");
 
 const ALREADY_EXISTS = 6; // gRPC status code
+
+/** Write a document once; a concurrent or repeated write of the same id is a no-op (first writer wins). */
+async function createOnce(ref: FirebaseFirestore.DocumentReference, data: object): Promise<void> {
+  try {
+    await ref.create(data);
+  } catch (error) {
+    if ((error as { code?: number }).code !== ALREADY_EXISTS) throw error;
+  }
+}
 
 export interface AdvisoryRecord {
   status: AdvisorySummary["status"];
@@ -56,11 +71,18 @@ export interface AdvisoryRecord {
  * decision is written once, and replays of the same conversation (the client resends history) are no-ops.
  */
 export async function recordDecision(toolCallId: string, record: AdvisoryRecord): Promise<void> {
-  try {
-    await advisories.doc(toolCallId).create(record);
-  } catch (error) {
-    if ((error as { code?: number }).code !== ALREADY_EXISTS) throw error;
-  }
+  await createOnce(advisories.doc(toolCallId), record);
+}
+
+/** Gemini's cached reading of a scenario's IMD bulletin, or null before the first read. */
+export async function getBulletin(scenarioId: string): Promise<Bulletin | null> {
+  const snapshot = await bulletins.doc(scenarioId).get();
+  return snapshot.exists ? (snapshot.data() as Bulletin) : null;
+}
+
+/** Cache a bulletin reading; documents never change, so the first reading is kept. */
+export async function saveBulletin(scenarioId: string, bulletin: Bulletin): Promise<void> {
+  await createOnce(bulletins.doc(scenarioId), bulletin);
 }
 
 const SCAN_LIMIT = 100;

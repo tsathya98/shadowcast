@@ -3,7 +3,7 @@
 import { clsx } from "clsx";
 import { useMemo, useState } from "react";
 
-import { assetName, assetValue, type ColorBy, kindLabel, percent, rgbCss, riskColor } from "@/lib/format";
+import { assetName, assetValue, type ColorBy, kindLabel, percent, rampColor, rgbCss } from "@/lib/format";
 import type { Asset, ForecastAsset } from "@/lib/types";
 
 interface AssetListProps {
@@ -53,7 +53,10 @@ export function AssetList({ assets, colorBy, selectedId, onSelect }: AssetListPr
         {filtered.slice(0, visible).map((asset) => {
           const value = assetValue(asset, colorBy, null);
           const forecast = "p34" in asset;
-          const shown = colorBy === "gales" && forecast ? (asset as ForecastAsset).p34 : asset.p_outage;
+          const shown =
+            colorBy === "flood"
+              ? `${(asset.flood_m ?? 0).toFixed(1)} m`
+              : percent(colorBy === "gales" && forecast ? (asset as ForecastAsset).p34 : asset.p_outage);
           return (
             <li key={asset.asset_id}>
               <button
@@ -73,11 +76,11 @@ export function AssetList({ assets, colorBy, selectedId, onSelect }: AssetListPr
                   </span>
                 </span>
                 <span className="text-right">
-                  <span className="readout block text-sm text-[var(--text-primary)]">{percent(shown)}</span>
+                  <span className="readout block text-sm text-[var(--text-primary)]">{shown}</span>
                   <span className="mt-1.5 block h-[3px] rounded-full bg-[var(--surface-3)]" aria-hidden>
                     <span
                       className="block h-full rounded-full"
-                      style={{ width: `${Math.max(4, value * 100)}%`, background: rgbCss(riskColor(value)) }}
+                      style={{ width: `${Math.max(4, value * 100)}%`, background: rgbCss(rampColor(value, colorBy)) }}
                     />
                   </span>
                 </span>

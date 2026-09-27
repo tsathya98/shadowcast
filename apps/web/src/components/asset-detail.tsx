@@ -136,6 +136,13 @@ export function AssetDetail({ scenarioId, asset, onBack }: AssetDetailProps) {
         )}
         <Stat label="Gales arrive" value={istStamp(asset.gale_arrival)} />
         <Stat label="People · 2 km" value={compactNumber(asset.population)} />
+        {asset.flood_m != null && (
+          <Stat
+            label="Surge water"
+            value={`${asset.flood_m.toFixed(1)} m`}
+            hint={`${(asset.surge_m ?? 0).toFixed(1)} m on the coast ${Math.round(asset.coast_km ?? 0)} km away`}
+          />
+        )}
         <Stat
           label="Elevation"
           value={asset.elevation_m != null ? `${asset.elevation_m.toFixed(1)} m` : "–"}

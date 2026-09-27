@@ -13,11 +13,11 @@ import { LiveAlerts } from "@/components/live-alerts";
 import { PreparePanel } from "@/components/prepare-panel";
 import { ReplayStrip } from "@/components/replay-strip";
 import { Timeline } from "@/components/timeline";
-import { useAssets, useForecastTracks, useHazard, useScenario, useTrack } from "@/lib/api";
+import { useAssets, useForecastTracks, useHazard, useScenario, useSurge, useTrack } from "@/lib/api";
 import { LANGUAGES, REGION_LANGUAGE } from "@/lib/advisory";
 import { liveAlerts } from "@/lib/alerts";
 import { dutyBrief } from "@/lib/brief";
-import { type ColorBy, compactNumber, kindLabel, rgbCss, riskColor } from "@/lib/format";
+import { type ColorBy, compactNumber, FLOOD_FULL_M, kindLabel, rampColor, rgbCss } from "@/lib/format";
 import type { ReplayMode, ScenarioSummary } from "@/lib/types";
 
 // deck.gl and the Maps JS API need the browser: never render the map on the server.
@@ -31,8 +31,15 @@ const LEGENDS: Record<ColorBy, string> = {
   risk: "Grid-outage probability",
   gales: "Members bringing gales (34 kt)",
   wind: "Modelled wind now",
+  flood: "Storm-surge water at the site",
 };
-const COLOR_LABELS: Record<ColorBy, string> = { risk: "Outage", gales: "Gales", wind: "Wind now" };
+const COLOR_LABELS: Record<ColorBy, string> = { risk: "Outage", gales: "Gales", wind: "Wind now", flood: "Surge" };
+const LEGEND_ENDS: Record<ColorBy, [string, string]> = {
+  risk: ["0%", "100%"],
+  gales: ["0%", "100%"],
+  wind: ["0 kt", "120 kt"],
+  flood: ["0 m", `${FLOOD_FULL_M} m`],
+};
 const TABS = ["brief", "prioritise", "prepare", "prove"] as const;
 
 interface ConsoleProps {
@@ -65,6 +72,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   const { data: track } = useTrack(scenarioId);
   const { data: page, isLoading: assetsLoading } = useAssets(scenarioId, mode);
   const { data: members } = useForecastTracks(scenarioId, mode);
+  const { data: surge } = useSurge(scenarioId, mode);
 
   const span = useMemo(() => {
     const times = (track?.features ?? [])
@@ -146,7 +154,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
     );
   }
 
-  const colorOptions: ColorBy[] = mode.kind === "forecast" ? ["gales", "risk"] : ["risk", "wind"];
+  const colorOptions: ColorBy[] = mode.kind === "forecast" ? ["gales", "risk"] : ["risk", "wind", "flood"];
   const forecastKey = mode.kind === "forecast" ? mode.key : null;
   const forecast = scenario?.forecasts.find((f) => f.key === forecastKey);
   const local = scenario && REGION_LANGUAGE[scenario.region.id];
@@ -176,6 +184,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
             track={track}
             members={members}
             storm={mode.kind === "best-track" ? (hazard?.storm ?? null) : null}
+            surge={surge}
             selectedId={selectedId}
             onSelect={select}
           />
@@ -228,6 +237,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
                   unit="kt"
                 />
                 <Readout label="Backtest AUC" value={scenario.skill.auc?.toFixed(2) ?? "—"} />
+                <Readout label="Surge crest" value={scenario.surge.peak_m.toFixed(1)} unit="m" />
               </>
             )}
             <Readout label="≥50% outage" value={compactNumber(atRisk)} unit="assets" />
@@ -262,14 +272,20 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
         <div
           className="mt-2 h-1.5 rounded-full"
           style={{
-            background: `linear-gradient(90deg, ${[0, 0.25, 0.5, 0.75, 1].map((t) => rgbCss(riskColor(t))).join(", ")})`,
+            background: `linear-gradient(90deg, ${[0, 0.25, 0.5, 0.75, 1].map((t) => rgbCss(rampColor(t, colorBy))).join(", ")})`,
           }}
           aria-hidden
         />
         <div className="label mt-1.5 flex justify-between">
-          <span>{colorBy === "wind" ? "0 kt" : "0%"}</span>
-          <span>{colorBy === "wind" ? "120 kt" : "100%"}</span>
+          <span>{LEGEND_ENDS[colorBy][0]}</span>
+          <span>{LEGEND_ENDS[colorBy][1]}</span>
         </div>
+        {surge && (
+          <div className="mt-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+            <span className="size-2 rounded-full" style={{ background: rgbCss(rampColor(0.8, "flood")) }} aria-hidden />{" "}
+            Coast: modelled surge crest
+          </div>
+        )}
         {mode.kind === "forecast" && (
           <div className="mt-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
             <span className="h-0.5 w-5 bg-[var(--member)]" aria-hidden /> ECMWF ensemble members
@@ -316,12 +332,14 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
           />
         </div>
         <div className={clsx("min-h-0 flex-1 flex-col pt-2", tab === "prepare" ? "hidden" : "flex")}>
-          {tab === "brief" && brief ? (
+          {tab === "brief" && brief && scenario ? (
             <BriefPanel
-              scenarioId={scenarioId}
+              scenario={scenario}
+              forecastIssued={forecast?.issued ?? null}
               brief={brief}
               onOpenAsset={openAsset}
               onShowPriorities={() => setTab("prioritise")}
+              onShowFlood={() => setColorBy("flood")}
               onDraftAdvisory={() => setTab("prepare")}
             />
           ) : tab === "prove" && scenario ? (

@@ -7,7 +7,13 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
     coverage: {
-      include: ["src/lib/format.ts", "src/lib/advisory.ts", "src/lib/alerts.ts", "src/lib/brief.ts"],
+      include: [
+        "src/lib/format.ts",
+        "src/lib/advisory.ts",
+        "src/lib/alerts.ts",
+        "src/lib/brief.ts",
+        "src/lib/media.ts",
+      ],
       thresholds: { lines: 90, branches: 90 },
     },
   },

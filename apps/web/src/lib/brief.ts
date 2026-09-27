@@ -1,7 +1,8 @@
 /**
- * The duty brief at the timeline's current moment: the situation in two sentences, the exceptions that need attention,
- * and recommended actions per agency, each due before gales reach the group's first site (crews and generators cannot
- * be moved safely in gales). Pure and deterministic: every number comes from the ranked assets, never from Gemini.
+ * The duty brief at the timeline's current moment: the situation in a few sentences, the exceptions that need
+ * attention, and recommended actions per agency, each due before gales reach the group's first site (crews and
+ * generators cannot be moved safely in gales). Sites the modelled storm surge would flood get their own evacuation
+ * action. Pure and deterministic: every number comes from the ranked assets, never from Gemini.
  */
 import { assetName } from "./format";
 import type { Asset, ForecastAsset } from "./types";
@@ -32,6 +33,8 @@ export interface Brief {
   reached: number;
   /** The next likely site gales will reach. */
   next: { assetId: string; name: string; hours: number } | null;
+  /** Sites with at least ``FLOOD_M`` of modelled surge water; null without a surge model (forecast replays). */
+  flooded: number | null;
   actions: BriefAction[];
 }
 
@@ -47,8 +50,19 @@ interface BriefInput {
 const HOUR_MS = 3_600_000;
 const LIKELY = 0.5;
 const LANDFALL_WINDOW_H = 1;
-/** Who acts for which kinds of site, and what they do before gales arrive. Covers every asset kind the geo API emits. */
-const AGENCIES = [
+const FLOOD_M = 0.3; // ankle-deep: enough to stop vehicles and wet equipment
+const PEOPLE_SITES = ["cyclone_shelter", "school", "hospital", "health_centre", "clinic"];
+/**
+ * Who acts for which kinds of site, and what they do before gales arrive. The first group is chosen by modelled surge
+ * water rather than outage likelihood; together the rest cover every asset kind the geo API emits.
+ */
+const AGENCIES: { agency: string; kinds: string[]; task: string; flood?: true }[] = [
+  {
+    agency: "Evacuation",
+    kinds: PEOPLE_SITES,
+    task: "Move people and patients out of sites the surge will flood",
+    flood: true,
+  },
   {
     agency: "Health",
     kinds: ["hospital", "health_centre", "clinic"],
@@ -86,8 +100,11 @@ export function dutyBrief({ assets, timeMs, storm, region, landfall }: BriefInpu
   // Stable sort keeps rank order among sites that gales reach at the same moment.
   const next = likely.filter((a) => a.gale_arrival && galeMs(a) > timeMs).sort((a, b) => galeMs(a) - galeMs(b))[0];
 
-  const actions = AGENCIES.flatMap(({ agency, kinds, task }): BriefAction[] => {
-    const group = likely.filter((a) => kinds.includes(a.kind));
+  const surgeModelled = assets.some((a) => a.flood_m != null);
+  const flooded = assets.filter((a) => (a.flood_m ?? 0) >= FLOOD_M);
+
+  const actions = AGENCIES.flatMap(({ agency, kinds, task, flood }): BriefAction[] => {
+    const group = (flood ? flooded : likely).filter((a) => kinds.includes(a.kind));
     if (group.length === 0) return [];
     const lead = group.find((a) => a.name) ?? group[0];
     const first = Math.min(...group.map(galeMs));
@@ -122,13 +139,18 @@ export function dutyBrief({ assets, timeMs, storm, region, landfall }: BriefInpu
     likely.length === 0
       ? `No site is likely to ${hazard}: all clear.`
       : `${count} ${likely.length === 1 ? "site is" : "sites are"} likely to ${hazard}; gales have reached ${reached} of them.`;
+  const surge =
+    flooded.length > 0
+      ? ` The storm surge could flood ${flooded.length.toLocaleString("en-IN")} ${flooded.length === 1 ? "site" : "sites"}.`
+      : "";
 
   return {
-    summary: `${when} ${impact}`,
+    summary: `${when} ${impact}${surge}`,
     hazard,
     likely: likely.length,
     reached,
     next: next ? { assetId: next.asset_id, name: assetName(next), hours: Math.max(1, hoursTo(galeMs(next))) } : null,
+    flooded: surgeModelled ? flooded.length : null,
     actions,
   };
 }

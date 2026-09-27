@@ -6,8 +6,17 @@ import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { APIProvider, Map as GoogleMap, useMap } from "@vis.gl/react-google-maps";
 import { useEffect, useMemo, useRef } from "react";
 
-import { assetValue, type ColorBy, kindLabel, percent, type Rgb, riskColor } from "@/lib/format";
-import type { Asset, ForecastAsset, Region, StormPosition, TrackFeatureCollection } from "@/lib/types";
+import {
+  assetValue,
+  type ColorBy,
+  istStamp,
+  kindLabel,
+  percent,
+  rampColor,
+  type Rgb,
+  SURGE_FULL_M,
+} from "@/lib/format";
+import type { Asset, ForecastAsset, Region, StormPosition, SurgePoint, TrackFeatureCollection } from "@/lib/types";
 
 type Path = { id: string; path: [number, number][] };
 
@@ -20,6 +29,8 @@ interface MapViewProps {
   track: TrackFeatureCollection | undefined;
   members: TrackFeatureCollection | undefined;
   storm: StormPosition | null;
+  /** Peak modelled surge along the coast (best track only). */
+  surge: SurgePoint[] | undefined;
   selectedId: string | null;
   onSelect: (assetId: string | null) => void;
 }
@@ -140,14 +151,15 @@ function FitRegion({ region }: { region: Region }) {
 }
 
 export function MapView(props: MapViewProps) {
-  const { apiKey, region, assets, colorBy, windById, track, members, storm, selectedId, onSelect } = props;
+  const { apiKey, region, assets, colorBy, windById, track, members, storm, surge, selectedId, onSelect } = props;
 
   const layers = useMemo(() => {
     const assetLayer = new ScatterplotLayer<Asset | ForecastAsset>({
       id: "assets",
       data: [...assets].reverse(), // draw highest priority last so it sits on top
       getPosition: (a) => [a.lon, a.lat],
-      getFillColor: (a) => [...riskColor(assetValue(a, colorBy, windById)), 200] as [number, number, number, number],
+      getFillColor: (a) =>
+        [...rampColor(assetValue(a, colorBy, windById), colorBy), 200] as [number, number, number, number],
       getRadius: (a) => 2 + 3.5 * assetValue(a, colorBy, windById), // small enough that dense clusters stay legible
       getLineColor: (a) =>
         (a.asset_id === selectedId ? [...WHITE, 255] : [...VOID, 200]) as [number, number, number, number],
@@ -193,11 +205,27 @@ export function MapView(props: MapViewProps) {
       lineWidthUnits: "pixels",
       getLineWidth: 1.5,
     });
-    return [memberLayer, trackLayer, assetLayer, stormLayer];
-  }, [assets, colorBy, windById, members, track, storm, selectedId, onSelect]);
+    // The surge crest as a band of light along the shore, blue like the water encoding.
+    const surgeLayer = new ScatterplotLayer<SurgePoint>({
+      id: "surge",
+      data: surge ?? [],
+      getPosition: (p) => [p.lon, p.lat],
+      getFillColor: (p) =>
+        [...rampColor((p.peak_m ?? 0) / SURGE_FULL_M, "flood"), 230] as [number, number, number, number],
+      getRadius: (p) => 1.5 + (4 * Math.min(p.peak_m ?? 0, SURGE_FULL_M)) / SURGE_FULL_M,
+      radiusUnits: "pixels",
+      pickable: true,
+    });
+    return [memberLayer, trackLayer, surgeLayer, assetLayer, stormLayer];
+  }, [assets, colorBy, windById, members, track, storm, surge, selectedId, onSelect]);
 
   const tooltip = useMemo(
     () => (info: PickingInfo) => {
+      if (info.object && info.layer?.id === "surge") {
+        const point = info.object as SurgePoint;
+        return `Storm surge ${point.peak_m?.toFixed(1)} m · ${istStamp(point.peak_time)}
+wind setup ${point.setup_m?.toFixed(1)} m + low pressure ${point.barometer_m?.toFixed(1)} m`;
+      }
       const asset = info.object as Asset | ForecastAsset | undefined;
       if (!asset || info.layer?.id !== "assets") return null;
       const gales = "p34" in asset ? ` · gales ${percent(asset.p34)}` : "";

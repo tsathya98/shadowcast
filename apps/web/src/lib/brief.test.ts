@@ -83,10 +83,28 @@ describe("dutyBrief", () => {
     expect(brief.actions).toHaveLength(1);
   });
 
+  it("adds an evacuation action for sites the surge will flood, first when it is due soonest", () => {
+    const surged = [
+      { ...asset(7, "cyclone_shelter", "2019-05-02T14:00:00Z", 0.1, "Low shelter"), flood_m: 0.8 },
+      { ...asset(8, "substation", "2019-05-02T14:00:00Z", 0.1), flood_m: 1.2 }, // floods, but not a people site
+      { ...asset(9, "hospital", null, 0.1), flood_m: 0 },
+    ];
+
+    const brief = dutyBrief({ ...fani, assets: surged, timeMs: at("2019-05-02T13:00:00Z") });
+
+    expect(brief.flooded).toBe(2);
+    expect(brief.summary.endsWith("The storm surge could flood 2 sites.")).toBe(true);
+    expect(brief.actions).toEqual([
+      expect.objectContaining({ agency: "Evacuation", sites: 1, leadName: "Low shelter", hours: 1 }),
+    ]);
+    const one = dutyBrief({ ...fani, assets: surged.slice(0, 1), timeMs: at("2019-05-02T13:00:00Z") });
+    expect(one.summary.endsWith("The storm surge could flood 1 site.")).toBe(true);
+  });
+
   it("is all clear when no site is likely to be hit", () => {
     const brief = dutyBrief({ ...fani, assets: [assets[5]], timeMs: at("2019-05-02T13:00:00Z") });
 
     expect(brief.summary.endsWith("No site is likely to lose power: all clear.")).toBe(true);
-    expect(brief).toMatchObject({ likely: 0, reached: 0, next: null, actions: [] });
+    expect(brief).toMatchObject({ likely: 0, reached: 0, next: null, flooded: null, actions: [] });
   });
 });

@@ -65,12 +65,44 @@ export interface ForecastSummary {
   source: string;
 }
 
+/** IMD's reported surge next to the modelled peak on the same stretch of coast. */
+export interface SurgeObservation {
+  place: string;
+  low_m: number;
+  high_m: number;
+  kind: string;
+  source: string;
+  modelled_m: number | null;
+}
+
+/** The modelled storm-surge crest along the region's open coast (best track). */
+export interface SurgeSummary {
+  peak_m: number;
+  lat: number;
+  lon: number;
+  time: string;
+  coast_points: number;
+  flooded_sites: number;
+  method: string;
+  observed: SurgeObservation | null;
+}
+
+export interface SurgePoint {
+  lat: number;
+  lon: number;
+  peak_m: number | null;
+  setup_m: number | null;
+  barometer_m: number | null;
+  peak_time: string | null;
+}
+
 export interface ScenarioDetail extends ScenarioSummary {
   track_source: string;
   asset_counts: Record<string, number>;
   model: OutageModel;
   skill: Skill;
   loss_by_band: LossBand[];
+  surge: SurgeSummary;
   forecasts: ForecastSummary[];
   built_at: string;
 }
@@ -92,6 +124,10 @@ export interface Asset {
   gale_arrival: string | null;
   population: number | null;
   elevation_m: number | null;
+  /** Storm surge on the best track only: distance to the open coast, the peak surge there, water depth here. */
+  coast_km?: number | null;
+  surge_m?: number | null;
+  flood_m?: number | null;
   criticality: number;
   p_outage: number;
   score: number;

@@ -14,7 +14,7 @@ import {
 
 import { Tile } from "@/components/tile";
 import { useBacktest } from "@/lib/api";
-import { percent } from "@/lib/format";
+import { istStamp, percent } from "@/lib/format";
 import type { ScenarioDetail } from "@/lib/types";
 
 const TOOLTIP_STYLE = {
@@ -28,7 +28,8 @@ const AXIS_TICK = { fontSize: 11, fill: "var(--text-muted)", fontFamily: "var(--
 /** "Prove": how well modelled wind predicted observed night-light loss after landfall. */
 export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
   const { data } = useBacktest(scenario.id);
-  const { skill } = scenario;
+  const { skill, surge } = scenario;
+  const observed = surge.observed;
   const holdout = skill.spatial_holdout;
   const blockAucs = (holdout?.blocks ?? []).flatMap((b) => (b.auc == null ? [] : [b.auc]));
   const lit = (data?.substations ?? []).filter((s) => s.lit && s.loss_pct != null && s.peak_wind_kt != null);
@@ -142,6 +143,46 @@ export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
             </ScatterChart>
           </ResponsiveContainer>
         </div>
+      </section>
+
+      <section aria-labelledby="prove-surge">
+        <h3 id="prove-surge" className="label mb-2">
+          Storm surge vs IMD
+        </h3>
+        {observed && (
+          <div className="grid grid-cols-2 gap-2">
+            <Tile
+              label="Modelled"
+              value={observed.modelled_m == null ? "–" : `${observed.modelled_m.toFixed(1)} m`}
+              hint={observed.place}
+            />
+            <Tile
+              label="IMD reported"
+              value={
+                observed.low_m === observed.high_m ? `${observed.low_m} m` : `${observed.low_m}–${observed.high_m} m`
+              }
+              hint={observed.kind}
+            />
+          </div>
+        )}
+        <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+          Modelled crest {surge.peak_m.toFixed(1)} m at {surge.lat.toFixed(2)}°N {surge.lon.toFixed(2)}°E,{" "}
+          {istStamp(surge.time)}; {surge.flooded_sites} sites get at least 0.3 m of water. Method: {surge.method}.
+          {observed && (
+            <>
+              {" "}
+              <a
+                href={observed.source}
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-[var(--text-primary)]"
+              >
+                IMD report
+              </a>
+              .
+            </>
+          )}
+        </p>
       </section>
     </div>
   );

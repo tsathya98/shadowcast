@@ -11,7 +11,7 @@ import {
   oklchToRgb,
   percent,
   rgbCss,
-  riskColor,
+  rampColor,
   utcAndIst,
 } from "./format";
 import type { Asset, ForecastAsset } from "./types";
@@ -65,12 +65,14 @@ describe("colour", () => {
     expect(oklchToRgb(0, 0, 0)).toEqual([0, 0, 0]);
   });
 
-  it("risk ramp gets monotonically lighter and clamps out-of-range input", () => {
-    const luminance = (p: number) => riskColor(p).reduce((sum, channel) => sum + channel, 0);
+  it("ramps get monotonically lighter, clamp out-of-range input, and turn blue for water", () => {
+    const luminance = (p: number) => rampColor(p).reduce((sum, channel) => sum + channel, 0);
     expect(luminance(0.25)).toBeGreaterThan(luminance(0));
     expect(luminance(1)).toBeGreaterThan(luminance(0.75));
-    expect(riskColor(-1)).toEqual(riskColor(0));
-    expect(riskColor(2)).toEqual(riskColor(1));
+    expect(rampColor(-1)).toEqual(rampColor(0));
+    expect(rampColor(2)).toEqual(rampColor(1));
+    const [red, , blue] = rampColor(1, "flood");
+    expect(blue).toBeGreaterThan(red);
   });
 
   it("renders CSS colours", () => {
@@ -87,6 +89,8 @@ describe("assetValue", () => {
     ["wind", asset, new Map([["osm:node/1", 60]]), 0.5],
     ["wind", asset, new Map([["osm:node/1", 300]]), 1],
     ["wind", asset, null, 0],
+    ["flood", { ...asset, flood_m: 1 }, null, 0.5],
+    ["flood", asset, null, 0],
   ] as const)("colorBy=%s", (colorBy, item, wind, expected) => {
     expect(assetValue(item, colorBy, wind)).toBe(expected);
   });

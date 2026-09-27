@@ -2,16 +2,22 @@
 
 import { clsx } from "clsx";
 
+import { BulletinCard } from "@/components/bulletin-card";
 import { Tile } from "@/components/tile";
 import { useAdvisories } from "@/lib/api";
 import type { Brief } from "@/lib/brief";
 import { compactNumber, istStamp } from "@/lib/format";
+import type { ScenarioDetail } from "@/lib/types";
 
 interface BriefPanelProps {
-  scenarioId: string;
+  scenario: ScenarioDetail;
+  /** Issue time of the forecast being replayed, or null on the best track. */
+  forecastIssued: string | null;
   brief: Brief;
   onOpenAsset: (assetId: string) => void;
   onShowPriorities: () => void;
+  /** Colours the map by surge water. */
+  onShowFlood: () => void;
   onDraftAdvisory: () => void;
 }
 
@@ -19,15 +25,25 @@ interface BriefPanelProps {
  * The duty brief: the situation, the exceptions that need attention, recommended actions per agency and the
  * advisory audit trail. Everything is re-derived as the replay moves; every item drills down into the map and list.
  */
-export function BriefPanel({ scenarioId, brief, onOpenAsset, onShowPriorities, onDraftAdvisory }: BriefPanelProps) {
-  const { data: advisories, error } = useAdvisories(scenarioId);
+export function BriefPanel({
+  scenario,
+  forecastIssued,
+  brief,
+  onOpenAsset,
+  onShowPriorities,
+  onShowFlood,
+  onDraftAdvisory,
+}: BriefPanelProps) {
+  const { data: advisories, error } = useAdvisories(scenario.id);
   const { next } = brief;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-4">
       <p className="text-[15px] leading-relaxed text-[var(--text-primary)]">{brief.summary}</p>
 
-      <section aria-label="Exceptions" className="grid grid-cols-3 gap-2">
+      <BulletinCard scenario={scenario} forecastIssued={forecastIssued} />
+
+      <section aria-label="Exceptions" className="grid grid-cols-2 gap-2">
         <Tile
           label="At risk"
           value={compactNumber(brief.likely)}
@@ -41,6 +57,14 @@ export function BriefPanel({ scenarioId, brief, onOpenAsset, onShowPriorities, o
           hint={next?.name ?? "none due"}
           onClick={next ? () => onOpenAsset(next.assetId) : undefined}
         />
+        {brief.flooded != null && (
+          <Tile
+            label="Surge flood"
+            value={compactNumber(brief.flooded)}
+            hint="sites in the surge zone"
+            onClick={onShowFlood}
+          />
+        )}
       </section>
 
       <section aria-labelledby="brief-actions">

@@ -9,8 +9,9 @@ import { z } from "zod";
 import { advisorySchema, LANGUAGES, REGION_LANGUAGE, toCapXml } from "@/lib/advisory";
 import { kindLabel, utcAndIst } from "@/lib/format";
 import type { Asset, ForecastAsset, Page, ScenarioDetail } from "@/lib/types";
+import { officialBulletin } from "@/server/bulletins";
 import { geoFetch } from "@/server/geo";
-import { recordDecision, vertex } from "@/server/google";
+import { GEMINI_MODEL, recordDecision, vertex } from "@/server/google";
 
 export const agentContextSchema = z.object({
   scenarioId: z.string().regex(/^[a-z0-9-]{1,40}$/),
@@ -23,7 +24,6 @@ export const agentContextSchema = z.object({
 
 export type AgentContext = z.infer<typeof agentContextSchema>;
 
-const MODEL_ID = "gemini-3.8-flash";
 const MAX_STEPS = 8;
 // Vertex AI pay-as-you-go capacity is shared and briefly throttles bursts (429); back off 2, 4, 8, 16 s.
 const MAX_RETRIES = 4;
@@ -44,6 +44,7 @@ function toolAsset(asset: Asset | ForecastAsset, hindsight: boolean) {
     elevation_m: asset.elevation_m,
     ...("p34" in asset && { p_gale_34kt: asset.p34, p_hurricane_64kt: asset.p64, members: asset.members }),
     ...(hindsight && { observed_night_light_loss_pct: asset.observed_loss_pct }),
+    ...(asset.flood_m != null && { surge_m: asset.surge_m, surge_water_m: asset.flood_m, coast_km: asset.coast_km }),
     reasons: asset.reasons,
   };
 }
@@ -67,6 +68,11 @@ function instructions(scenario: ScenarioDetail, context: AgentContext): string {
 - Backtest for this storm (${skill.out_of_sample ? "out of sample: the model was never fitted on it" : "in sample"}): AUC ${skill.auc?.toFixed(2) ?? "n/a"}, Brier ${skill.brier?.toFixed(3) ?? "n/a"}, Spearman ${skill.spearman?.toFixed(2) ?? "n/a"}. Loss by modelled wind: ${bands || "not available"}.` +
       (skill.spatial_holdout
         ? ` Spatial holdout (${skill.spatial_holdout.folds} stretches of coast each hidden in turn): out-of-fold AUC ${skill.spatial_holdout.auc?.toFixed(2) ?? "n/a"}.`
+        : "") +
+      `
+- Storm surge (screening model on the best track: ${scenario.surge.method}): crest ${scenario.surge.peak_m.toFixed(1)} m around ${utcAndIst(scenario.surge.time)}; ${scenario.surge.flooded_sites} assets get at least 0.3 m of water (surge_water_m in the tool results). Never send people to a shelter in the surge zone.` +
+      (scenario.surge.observed
+        ? ` IMD reported ${scenario.surge.observed.low_m}-${scenario.surge.observed.high_m} m at ${scenario.surge.observed.place} (${scenario.surge.observed.kind}); the model gives ${scenario.surge.observed.modelled_m ?? "n/a"} m there.`
         : "");
   const local = REGION_LANGUAGE[scenario.region.id];
   const languages = local ? `English, Hindi and ${LANGUAGES[local].name}` : "English and Hindi";
@@ -86,6 +92,10 @@ Rules:
 - Answer in a few short sentences or "-" bullet lines. Plain text: no Markdown headings, bold or tables. Give times in IST.
 - To draft an advisory, first gather the facts with searchAssets, then call issueAdvisory exactly once, with no accompanying text: the officer reviews it on a card and approves or rejects it. Nothing is issued without approval. Once the decision comes back, confirm it in one short sentence.
 - Advisory content: base onset on the earliest gale arrival among the covered assets; order officer actions by priority; write the public message in ${languages}, with Hindi${local ? ` and ${LANGUAGES[local].name}` : ""} in native script and simple words a villager understands.
+- IMD is the authority. Before drafting an advisory, call officialBulletin and keep the advisory consistent with it (landfall, districts, surge heights); where ShadowCast's numbers differ, say so in one line and defer to IMD.
+- The officer may speak instead of typing: for a voice note, first write one line "Heard: …" with what they said (in their language, then English if it was not English), then answer in the language they spoke.
+- For an attached photo, describe only what is visibly damaged or flooded and how badly (none, minor, major, destroyed), and say what the photo cannot show. Link it to an asset only if the officer names one, then look it up with searchAssets.
+- For an attached PDF (an IMD bulletin, a situation report), extract what it states and compare it with ShadowCast's numbers.
 - If the officer rejects an advisory, do not call issueAdvisory again until they say what to change.
 - This is a replay of a past storm, so every advisory is a CAP "Exercise" message, not an official warning. IMD and OSDMA remain the authority.`;
 }
@@ -99,7 +109,7 @@ export function createAgent(scenario: ScenarioDetail, context: AgentContext) {
   const kinds = Object.keys(scenario.asset_counts) as [string, ...string[]];
 
   return new ToolLoopAgent({
-    model: vertex(MODEL_ID),
+    model: vertex(GEMINI_MODEL),
     instructions: instructions(scenario, context),
     stopWhen: isStepCount(MAX_STEPS),
     maxRetries: MAX_RETRIES,
@@ -122,6 +132,21 @@ export function createAgent(scenario: ScenarioDetail, context: AgentContext) {
           for (const kind of selected ?? []) params.append("kind", kind);
           const page = await geoFetch<Page<Asset | ForecastAsset>>(`${assetsPath}?${params}`);
           return { total: page.total, assets: page.items.map((asset) => toolAsset(asset, !context.forecastKey)) };
+        },
+      }),
+      officialBulletin: tool({
+        description:
+          "The official IMD bulletin for this storm, read by Gemini from IMD's PDF: storm position, wind, expected landfall, " +
+          "storm surge and districts, rainfall, expected damage and IMD's suggested actions.",
+        inputSchema: z.object({}),
+        execute: async () => {
+          const bulletin = await officialBulletin(scenario.id);
+          if (!bulletin) return { available: false, note: "No archived IMD bulletin for this storm." };
+          const forecast = scenario.forecasts.find((f) => f.key === context.forecastKey);
+          if (forecast && !(Date.parse(bulletin.reading.issued) <= Date.parse(forecast.issued))) {
+            return { available: false, note: "IMD's bulletin in the archive was issued after this forecast." };
+          }
+          return { available: true, kind: bulletin.kind, source: bulletin.source, ...bulletin.reading };
         },
       }),
       issueAdvisory: tool({

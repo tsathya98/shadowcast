@@ -4,8 +4,16 @@ import type { Asset, ForecastAsset } from "./types";
 
 export type Rgb = [number, number, number];
 
-/** What the map and list encode: outage risk, ensemble gale chance, or modelled wind at the scrubber time. */
-export type ColorBy = "risk" | "gales" | "wind";
+/**
+ * What the map and list encode: outage risk, ensemble gale chance, modelled wind at the scrubber time, or modelled
+ * surge water at the site.
+ */
+export type ColorBy = "risk" | "gales" | "wind" | "flood";
+
+/** Water depth that saturates the flood encoding. */
+export const FLOOD_FULL_M = 2;
+/** Surge height that saturates the coastal surge band. */
+export const SURGE_FULL_M = 4;
 
 export const KIND_LABELS: Record<string, string> = {
   hospital: "Hospital",
@@ -101,12 +109,13 @@ export function oklchToRgb(l: number, c: number, hueDegrees: number): Rgb {
 }
 
 /**
- * Sequential single-hue ramp for probabilities on the dark map: low values recede toward the surface (dark, low
- * chroma), high values are bright. Lightness rises monotonically so magnitude reads without relying on hue.
+ * Sequential single-hue ramp on the dark map: low values recede toward the surface (dark, low chroma), high values
+ * are bright. Lightness rises monotonically so magnitude reads without relying on hue. Wind and risk share the amber
+ * signal; water is blue.
  */
-export function riskColor(probability: number): Rgb {
-  const t = Math.min(1, Math.max(0, probability));
-  return oklchToRgb(0.34 + 0.52 * t, 0.03 + 0.15 * t, 48);
+export function rampColor(value: number, colorBy: ColorBy = "risk"): Rgb {
+  const t = Math.min(1, Math.max(0, value));
+  return oklchToRgb(0.34 + 0.52 * t, 0.03 + 0.15 * t, colorBy === "flood" ? 245 : 48);
 }
 
 export function rgbCss([r, g, b]: Rgb, alpha = 1): string {
@@ -121,5 +130,6 @@ export function assetValue(
 ): number {
   if (colorBy === "gales") return "p34" in asset ? asset.p34 : 0;
   if (colorBy === "wind") return Math.min(1, (windById?.get(asset.asset_id) ?? 0) / 120);
+  if (colorBy === "flood") return Math.min(1, (asset.flood_m ?? 0) / FLOOD_FULL_M);
   return asset.p_outage;
 }

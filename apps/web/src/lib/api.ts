@@ -7,6 +7,7 @@
 import useSWR, { type SWRConfiguration } from "swr";
 
 import type { AdvisorySummary } from "./advisory";
+import type { Bulletin } from "./bulletin";
 import type {
   Asset,
   AssetDetail,
@@ -16,6 +17,7 @@ import type {
   Page,
   ReplayMode,
   ScenarioDetail,
+  SurgePoint,
   TrackFeatureCollection,
 } from "./types";
 
@@ -55,6 +57,15 @@ export function useAssetDetail(id: string, assetId: string | null) {
   return useSWR<AssetDetail>(assetId ? `${GEO_PREFIX}/scenarios/${id}/assets/${assetId}` : null, fetchJson, STATIC);
 }
 
+/** Peak modelled surge along the open coast; best-track replays only (a forecast must not show hindsight). */
+export function useSurge(id: string, mode: ReplayMode) {
+  return useSWR<SurgePoint[]>(
+    mode.kind === "best-track" ? `${GEO_PREFIX}/scenarios/${id}/surge` : null,
+    fetchJson,
+    STATIC,
+  );
+}
+
 export function useBacktest(id: string) {
   return useSWR<Backtest>(`${GEO_PREFIX}/scenarios/${id}/backtest`, fetchJson, STATIC);
 }
@@ -74,4 +85,9 @@ export function useHazard(id: string, at: string | null) {
 /** The latest officer decisions for a scenario; revalidated whenever the brief mounts, so a new decision shows up. */
 export function useAdvisories(scenarioId: string) {
   return useSWR<AdvisorySummary[]>(`/api/advisories?scenario=${scenarioId}`, fetchJson);
+}
+
+/** Gemini's reading of the scenario's official IMD bulletin; the first request may take a while (Gemini reads the PDF). */
+export function useBulletin(scenarioId: string) {
+  return useSWR<Bulletin>(`/api/bulletins/${scenarioId}`, fetchJson, { ...STATIC, shouldRetryOnError: false });
 }
