@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Deploy the ShadowCast geo API: scenario bucket, read-only service account and Cloud Run service.
-# Idempotent. With --publish, first uploads locally built artifacts (services/geo/artifacts) to the bucket.
+# Idempotent. The build writes artifacts straight to the bucket; the service loads them at startup.
 #
-# Usage: PROJECT=argmax-cyclone-2026 REGION=asia-south1 infra/geo.sh [--publish]
+# Usage: PROJECT=argmax-cyclone-2026 REGION=asia-south1 infra/geo.sh
 # Build artifacts with:  cd services/geo && uv run --all-extras python -m shadowcast_geo.build
 set -euo pipefail
 
@@ -24,11 +24,6 @@ echo "==> Bucket gs://${BUCKET}"
 if ! "${GCLOUD[@]}" storage buckets describe "gs://${BUCKET}" >/dev/null 2>&1; then
   "${GCLOUD[@]}" storage buckets create "gs://${BUCKET}" --location="${REGION}" \
     --uniform-bucket-level-access --public-access-prevention
-fi
-
-if [[ "${1:-}" == "--publish" ]]; then
-  echo "==> Publishing artifacts from services/geo/artifacts"
-  "${GCLOUD[@]}" storage rsync "${ROOT}/services/geo/artifacts" "gs://${BUCKET}" --recursive
 fi
 
 echo "==> Service account ${SA}"

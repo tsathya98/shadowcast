@@ -1,4 +1,4 @@
-"""Built scenario artifacts: JSON documents in Google Cloud Storage (production) or a local directory (development).
+"""Built scenario artifacts: JSON documents in Google Cloud Storage, the service's only store.
 
 Layout::
 
@@ -13,7 +13,6 @@ Layout::
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any, Protocol
 
 from google.cloud import storage
@@ -102,58 +101,13 @@ class GcsArtifacts:
         return bool(self._bucket.blob(path).exists())
 
 
-class LocalArtifacts:
-    """Artifacts under a local directory, mirroring the bucket layout."""
-
-    def __init__(self, root: Path) -> None:
-        """Bind to a root directory.
-
-        Args:
-            root: Directory playing the role of the bucket root.
-        """
-        self._root = root
-
-    def read_json(self, path: str) -> Any:
-        """Read and decode one JSON file.
-
-        Args:
-            path: File path relative to the root.
-
-        Returns:
-            Any: The decoded JSON value.
-        """
-        return json.loads((self._root / path).read_text(encoding="utf-8"))
-
-    def write_json(self, path: str, data: Any) -> None:
-        """Encode and write one JSON file, creating parent directories.
-
-        Args:
-            path: File path relative to the root.
-            data: JSON-serialisable value.
-        """
-        target = self._root / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(data, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-
-    def exists(self, path: str) -> bool:
-        """Whether a file exists under the root.
-
-        Args:
-            path: File path relative to the root.
-
-        Returns:
-            bool: ``True`` when the file exists.
-        """
-        return (self._root / path).is_file()
-
-
 def artifact_store(settings: Settings) -> ArtifactStore:
-    """Choose the artifact store for the current environment.
+    """The artifact store for these settings.
 
     Args:
         settings: Resolved settings.
 
     Returns:
-        ArtifactStore: GCS when ``settings.bucket`` is set, otherwise the local artifact directory.
+        ArtifactStore: The scenario bucket.
     """
-    return GcsArtifacts(settings.bucket) if settings.bucket else LocalArtifacts(settings.artifact_dir)
+    return GcsArtifacts(settings.bucket)

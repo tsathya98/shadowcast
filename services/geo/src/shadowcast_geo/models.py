@@ -46,14 +46,50 @@ class ForecastSummary(Schema):
     source: str
 
 
+class SurgeObservation(Schema):
+    """IMD's reported surge next to the modelled peak on the same stretch of coast."""
+
+    place: str
+    low_m: float
+    high_m: float
+    kind: str = Field(description="tide gauge, post-storm survey or IMD estimate")
+    source: str
+    modelled_m: float | None = Field(description="Highest modelled surge on that stretch of coast")
+
+
+class SurgeSummary(Schema):
+    """The modelled storm-surge crest along the region's open coast (best track)."""
+
+    peak_m: float = Field(description="Highest modelled surge above still water (wind setup plus inverse barometer)")
+    lat: float
+    lon: float
+    time: str
+    coast_points: int
+    flooded_sites: int = Field(description="Assets with at least 0.3 m of modelled water")
+    method: str
+    observed: SurgeObservation | None = None
+
+
+class SurgePoint(Schema):
+    """Peak modelled surge at one open-coast point."""
+
+    lat: float
+    lon: float
+    peak_m: float | None
+    setup_m: float | None
+    barometer_m: float | None
+    peak_time: str | None
+
+
 class ScenarioDetail(ScenarioSummary):
-    """Scenario metadata, outage model, backtest skill and available forecast replays."""
+    """Scenario metadata, outage model, backtest skill, storm surge and available forecast replays."""
 
     track_source: str
     asset_counts: dict[str, int]
     model: dict[str, Any] = Field(description="Calibrated outage model: intercept, slope, trained_on, n, auc, brier")
     skill: dict[str, Any] = Field(description="Backtest skill on this scenario; out_of_sample marks held-out storms")
     loss_by_band: list[dict[str, float]]
+    surge: SurgeSummary
     forecasts: list[ForecastSummary] = []
     built_at: str
 
@@ -77,6 +113,9 @@ class Asset(Schema):
     gale_arrival: str | None = Field(default=None, description="First time the modelled wind reaches 34 kt")
     population: float | None
     elevation_m: float | None
+    coast_km: float | None = Field(default=None, description="Distance to the nearest open coast (best track only)")
+    surge_m: float | None = Field(default=None, description="Peak modelled surge on that coast")
+    flood_m: float | None = Field(default=None, description="Modelled surge water depth at the asset")
     criticality: int
     p_outage: float
     score: float

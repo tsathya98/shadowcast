@@ -18,6 +18,7 @@ OSDMA_SHELTERS_URL = "https://www.osdma.org/preparedness/multi-purpose-cyclone-f
 # ECMWF open data mirrored on Google Cloud Storage; keeps full history from 2024 onwards.
 ECMWF_OPEN_DATA = "https://storage.googleapis.com/ecmwf-open-data"
 ECMWF_TRACK_STEPS = (360, 240)  # tropical-cyclone track files are named -360h- since 2026 and -240h- before
+IMD_REPORTS = "https://rsmcnewdelhi.imd.gov.in/uploads/report/26"  # RSMC New Delhi cyclone reports
 
 # Earth Engine datasets.
 NIGHT_LIGHTS = "NASA/VIIRS/002/VNP46A2"
@@ -25,7 +26,11 @@ NIGHT_LIGHTS_BAND = "DNB_BRDF_Corrected_NTL"  # raw radiance; the gap-filled ban
 NIGHT_LIGHTS_QUALITY_BAND = "Mandatory_Quality_Flag"  # 0/1 = high-quality retrieval
 POPULATION = "WorldPop/GP/100m/pop"
 POPULATION_YEAR = 2020
-ELEVATION = "COPERNICUS/DEM/GLO30_2024_1"
+ELEVATION = "COPERNICUS/DEM/GLO30_2024_1"  # a surface model: reads roofs and canopy, used only inland
+# Bare-earth coastal terrain (Pronk et al. 2024, CC BY 4.0), so surge is compared with the ground, not the rooftops.
+COASTAL_DTM = "projects/sat-io/open-datasets/DELTARES/deltadtm_v1"
+BATHYMETRY = "NOAA/NGDC/ETOPO1"  # 1 arc-minute bedrock relief: negative below sea level
+BATHYMETRY_BAND = "bedrock"
 
 # Physical and modelling constants.
 EARTH_RADIUS_KM = 6371.0
@@ -43,6 +48,24 @@ OUTAGE_LOSS_PCT = 50.0  # an asset "lost power" when its night-light radiance fe
 HOLDOUT_FOLDS = 5  # spatial cross-validation blocks along the reference coast
 LOW_LYING_M = 5.0
 LOSS_BANDS_KT = (0, 60, 80, 100, 130)
+
+# Storm surge screening model (see surge.py).
+RHO_AIR = 1.15  # kg/m3, near-surface air in a tropical cyclone
+RHO_SEA = 1025.0  # kg/m3
+GRAVITY = 9.81  # m/s2
+INFLOW_DEG = 20.0  # surface inflow angle toward the storm centre
+TEN_MINUTE_FACTOR = 0.93  # 1-minute sustained to 10-minute mean wind at sea (Harper, Kepert & Ginger 2010)
+DRAG_MAX = 2.5e-3  # sea-surface drag saturates in hurricane winds (Powell, Vickery & Reinhold 2003)
+SHELF_DEPTH_M = 100.0  # transects end here; wind setup over deeper water is negligible
+MIN_WATER_DEPTH_M = 2.0  # floor on total depth at the shoreline, where 1D setup is singular
+TRANSECT_STEP_KM = 1.0
+TRANSECT_MAX_KM = 300.0
+BATHYMETRY_MARGIN_DEG = 2.5  # seaward extent fetched around a region so its transects reach the shelf edge
+COAST_NORMAL_CELLS = 9  # smoothing window (grid cells) for the coast orientation
+SURGE_DECAY_M_PER_KM = 1.0 / 14.5  # inland attenuation: the classic 1 m per 14.5 km (US Army Corps of Engineers 1963)
+SURGE_REACH_KM = 600.0  # storm positions farther than this from every coast point are skipped
+SURGE_TIME_CHUNK = 16
+FLOOD_DEPTH_M = 0.3  # "flooded" in summaries: ankle-deep water, enough to stop vehicles and wet equipment
 
 # Relative consequence of losing an asset (1-5), used to turn outage probability into a priority score.
 CRITICALITY: dict[str, int] = {
@@ -91,6 +114,27 @@ class Region:
 
 
 @dataclass(frozen=True)
+class SurgeReport:
+    """IMD's account of a storm's surge, the benchmark for the modelled crest.
+
+    Attributes:
+        place: Where it was reported.
+        bbox: ``(south, west, north, east)`` of that stretch of coast; the modelled peak inside it is compared.
+        low_m: Lower end of the reported height above astronomical tide (metres).
+        high_m: Upper end (equal to ``low_m`` for a single value).
+        kind: How it was measured: a tide gauge, a post-storm survey or an IMD estimate.
+        source: URL of the IMD report.
+    """
+
+    place: str
+    bbox: tuple[float, float, float, float]
+    low_m: float
+    high_m: float
+    kind: str
+    source: str
+
+
+@dataclass(frozen=True)
 class Scenario:
     """A historical cyclone replayed over a region.
 
@@ -104,6 +148,7 @@ class Scenario:
         truth_post: Inclusive start / exclusive end dates of the post-landfall night-light window.
         reference: Whether the outage model is fitted on this scenario (exactly one scenario should be).
         forecasts: ECMWF ensemble issue times (UTC) to replay as-issued; ECMWF open data exists from 2024 onwards.
+        surge_report: IMD's reported surge, when there is one.
     """
 
     id: str
@@ -115,6 +160,7 @@ class Scenario:
     truth_post: tuple[date, date]
     reference: bool = False
     forecasts: tuple[datetime, ...] = ()
+    surge_report: SurgeReport | None = None
 
 
 ODISHA_COAST = Region(
@@ -162,6 +208,14 @@ SCENARIOS: dict[str, Scenario] = {
             truth_pre=(date(2019, 4, 20), date(2019, 5, 2)),
             truth_post=(date(2019, 5, 4), date(2019, 5, 11)),
             reference=True,
+            surge_report=SurgeReport(
+                place="Puri coast",
+                bbox=(19.6, 85.4, 20.0, 86.3),
+                low_m=1.5,
+                high_m=1.5,
+                kind="IMD estimate at landfall",
+                source=f"{IMD_REPORTS}/26_7122ae_Preliminary%20Report%20on%20ESCS%20FANI_15082020.pdf",
+            ),
         ),
         Scenario(
             id="dana-2024",
@@ -175,6 +229,14 @@ SCENARIOS: dict[str, Scenario] = {
                 datetime(2024, 10, day, hour, tzinfo=UTC)
                 for day, hour in ((22, 0), (22, 12), (23, 0), (23, 12), (24, 0))
             ),
+            surge_report=SurgeReport(
+                place="Kendrapara, Bhadrak and Balasore coast",
+                bbox=(20.4, 86.5, 21.6, 87.2),
+                low_m=1.0,
+                high_m=2.0,
+                kind="IMD estimate",
+                source=f"{IMD_REPORTS}/26_5d5a67_Preliminary%20Report_SCS%20Dana_Approved.pdf",
+            ),
         ),
         # Held-out strong storm in a different state and grid; it predates ECMWF open data, so there is no as-issued
         # forecast replay. Both night-light windows fall inside India's COVID-19 lockdown.
@@ -187,6 +249,14 @@ SCENARIOS: dict[str, Scenario] = {
             landfall=datetime(2014, 10, 12, 7, 0, tzinfo=UTC),  # IMD: crossed near Visakhapatnam 12:00-13:00 IST
             truth_pre=(date(2014, 9, 26), date(2014, 10, 10)),
             truth_post=(date(2014, 10, 13), date(2014, 10, 20)),
+            surge_report=SurgeReport(
+                place="Visakhapatnam port",
+                bbox=(17.6, 83.2, 17.8, 83.4),
+                low_m=1.4,
+                high_m=1.4,
+                kind="tide gauge",
+                source=f"{IMD_REPORTS}/26_fac6af_hud.pdf",
+            ),
         ),
         Scenario(
             id="amphan-2020",
@@ -196,6 +266,14 @@ SCENARIOS: dict[str, Scenario] = {
             landfall=datetime(2020, 5, 20, 11, 0, tzinfo=UTC),  # IMD: crossed near the Sundarbans 15:30-17:30 IST
             truth_pre=(date(2020, 5, 5), date(2020, 5, 19)),
             truth_post=(date(2020, 5, 21), date(2020, 5, 28)),
+            surge_report=SurgeReport(
+                place="South and North 24 Parganas",
+                bbox=(21.5, 88.0, 22.3, 89.0),
+                low_m=4.6,
+                high_m=4.6,
+                kind="post-storm survey (ACWC Kolkata)",
+                source=f"{IMD_REPORTS}/26_3c837f_amphan%20with%20damage.pdf",
+            ),
         ),
     )
 }
@@ -206,8 +284,7 @@ class Settings:
     """Geo service settings resolved from the environment.
 
     Attributes:
-        bucket: GCS bucket holding built scenario artifacts; when unset, ``artifact_dir`` is used.
-        artifact_dir: Local artifact root for development.
+        bucket: GCS bucket holding built scenario artifacts (the build writes there, the API reads from there).
         cache_dir: Local cache for downloaded build inputs (IBTrACS, Overpass, OSDMA).
         ee_project: Google Cloud project used to initialise Earth Engine during builds.
         http_timeout_s: Per-request timeout for build-time downloads.
@@ -216,8 +293,7 @@ class Settings:
         allowed_origins: CORS origins allowed to call the API.
     """
 
-    bucket: str | None = None
-    artifact_dir: Path = Path("artifacts")
+    bucket: str = "argmax-cyclone-2026-scenarios"
     cache_dir: Path = Path(".cache")
     ee_project: str = "argmax-cyclone-2026"
     http_timeout_s: float = 300.0
@@ -238,8 +314,7 @@ class Settings:
         env = os.environ
         origins = env.get("GEO_ALLOWED_ORIGINS")
         return cls(
-            bucket=env.get("GEO_BUCKET") or None,
-            artifact_dir=Path(env.get("GEO_ARTIFACT_DIR", cls.artifact_dir)),
+            bucket=env.get("GEO_BUCKET") or cls.bucket,
             cache_dir=Path(env.get("GEO_CACHE_DIR", cls.cache_dir)),
             ee_project=env.get("GEO_EE_PROJECT", cls.ee_project),
             http_timeout_s=float(env.get("GEO_HTTP_TIMEOUT_S", cls.http_timeout_s)),

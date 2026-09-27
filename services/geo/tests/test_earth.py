@@ -29,7 +29,7 @@ def test_initialize(ee: MagicMock) -> None:
 
 def test_enrich_adds_population_and_elevation(ee: MagicMock) -> None:
     population = ee.ImageCollection.return_value.filter.return_value.mosaic.return_value.select.return_value
-    elevation = ee.ImageCollection.return_value.select.return_value.mosaic.return_value
+    elevation = ee.Image.return_value.rename.return_value.unmask.return_value
     population.reduceRegions.return_value.getInfo.return_value = _features({"sum": 1200.0}, {"sum": None})
     elevation.reduceRegions.return_value.getInfo.return_value = _features({"mean": 3.5})
 
@@ -61,3 +61,16 @@ def test_nightlight_loss(ee: MagicMock) -> None:
     high_quality(image)
     image.select.assert_any_call("Mandatory_Quality_Flag")
     image.select.return_value.lte.assert_called_once_with(1)
+
+
+def test_relief_requests_the_region_plus_a_seaward_margin(ee: MagicMock) -> None:
+    ee.data.computePixels.return_value = {"bedrock": np.array([[5, -20], [-40, -80]], dtype=np.int16)}
+
+    grid = earth.relief((19.0, 84.4, 21.7, 87.6))
+
+    request = ee.data.computePixels.call_args.args[0]
+    assert request["grid"]["affineTransform"]["translateX"] == pytest.approx(84.4 - 2.5)
+    assert request["grid"]["affineTransform"]["translateY"] == pytest.approx(21.7 + 2.5)
+    assert request["grid"]["dimensions"] == {"width": 492, "height": 462}
+    assert grid.cells.dtype == np.float64 and grid.cells[1, 1] == -80.0
+    assert grid.cell_deg == pytest.approx(1 / 60)

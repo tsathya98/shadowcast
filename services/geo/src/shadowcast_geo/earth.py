@@ -14,6 +14,10 @@ import numpy as np
 import pandas as pd
 
 from shadowcast_geo.config import (
+    BATHYMETRY,
+    BATHYMETRY_BAND,
+    BATHYMETRY_MARGIN_DEG,
+    COASTAL_DTM,
     ELEVATION,
     NIGHT_LIGHTS,
     NIGHT_LIGHTS_BAND,
@@ -23,6 +27,9 @@ from shadowcast_geo.config import (
     POPULATION_RADIUS_M,
     POPULATION_YEAR,
 )
+from shadowcast_geo.surge import Grid
+
+RELIEF_CELL_DEG = 1.0 / 60.0  # ETOPO1's native 1 arc-minute
 
 
 def initialize(project: str) -> None:
@@ -62,7 +69,10 @@ def _reduce(
 
 
 def enrich(assets: pd.DataFrame) -> pd.DataFrame:
-    """Add population within ``POPULATION_RADIUS_M`` (WorldPop) and ground elevation (Copernicus DEM) per asset.
+    """Add population within ``POPULATION_RADIUS_M`` (WorldPop) and ground elevation per asset.
+
+    Elevation is bare earth from DeltaDTM along the low coast, where storm surge matters, and the Copernicus surface
+    model inland.
 
     Args:
         assets: Frame with ``lat`` and ``lon``.
@@ -76,7 +86,8 @@ def enrich(assets: pd.DataFrame) -> pd.DataFrame:
         .mosaic()
         .select("population")
     )
-    elevation = ee.ImageCollection(ELEVATION).select("DEM").mosaic()
+    surface = ee.ImageCollection(ELEVATION).select("DEM").mosaic()
+    elevation = ee.Image(COASTAL_DTM).rename("DEM").unmask(surface)  # DeltaDTM covers the low coast only
     people = _reduce(assets, population, ee.Reducer.sum(), 100, POPULATION_RADIUS_M)
     height = _reduce(assets, elevation, ee.Reducer.mean(), 30)
     enriched = assets.copy()
@@ -123,3 +134,40 @@ def nightlight_loss(points: pd.DataFrame, pre: tuple[date, date], post: tuple[da
     )
     frame["loss_pct"] = 100.0 * (1.0 - frame["ntl_post"] / frame["ntl_pre"])
     return frame
+
+
+def relief(bbox: tuple[float, float, float, float]) -> Grid:
+    """Land elevation and sea-floor depth around a region, for the storm-surge transects.
+
+    Args:
+        bbox: ``(south, west, north, east)`` of the region; ``BATHYMETRY_MARGIN_DEG`` is added on every side so
+            offshore transects reach the shelf edge.
+
+    Returns:
+        Grid: ETOPO1 bedrock relief in metres (negative below sea level) at 1 arc-minute, north-up.
+    """
+    south, west, north, east = bbox
+    north, west = north + BATHYMETRY_MARGIN_DEG, west - BATHYMETRY_MARGIN_DEG
+    width = round((east + BATHYMETRY_MARGIN_DEG - west) / RELIEF_CELL_DEG)
+    height = round((north - south + BATHYMETRY_MARGIN_DEG) / RELIEF_CELL_DEG)
+    pixels = ee.data.computePixels(  # pyright: ignore[reportPrivateImportUsage]
+        {
+            "expression": ee.Image(BATHYMETRY).select(BATHYMETRY_BAND).toFloat(),
+            "fileFormat": "NUMPY_NDARRAY",
+            "grid": {
+                "dimensions": {"width": width, "height": height},
+                "affineTransform": {
+                    "scaleX": RELIEF_CELL_DEG,
+                    "shearX": 0,
+                    "translateX": west,
+                    "shearY": 0,
+                    "scaleY": -RELIEF_CELL_DEG,
+                    "translateY": north,
+                },
+                "crsCode": "EPSG:4326",
+            },
+        }
+    )
+    return Grid(
+        cells=np.asarray(pixels[BATHYMETRY_BAND], dtype=np.float64), north=north, west=west, cell_deg=RELIEF_CELL_DEG
+    )

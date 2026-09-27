@@ -32,8 +32,7 @@ uv run python -m shadowcast_archiver          # writes to ./archive when ARCHIVE
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ARCHIVE_BUCKET` | unset | GCS bucket; unset means write under `ARCHIVE_LOCAL_DIR` |
-| `ARCHIVE_LOCAL_DIR` | `archive` | Local archive root |
+| `ARCHIVE_BUCKET` | `argmax-cyclone-2026-archive` | GCS bucket the archive is written to (the only store) |
 | `ARCHIVE_GDACS_LOOKBACK_DAYS` | `10` | GDACS event window |
 | `ARCHIVE_FORECAST_DAYS` | `10` | WeatherNext 2 horizon |
 | `ARCHIVE_HTTP_TIMEOUT_S` | `60` | Per-request timeout |

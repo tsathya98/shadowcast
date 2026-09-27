@@ -2,18 +2,53 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from shadowcast_geo.calibration import OutageModel
 from shadowcast_geo.config import Settings
 from shadowcast_geo.hazard import Track
+from shadowcast_geo.surge import Grid
 
 START = datetime(2019, 5, 2, 12, tzinfo=UTC)
+
+
+class MemoryArtifacts:
+    """In-memory stand-in for the scenario bucket, with the same strict-JSON round trip."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, str] = {}
+
+    def read_json(self, path: str) -> Any:
+        return json.loads(self.objects[path])
+
+    def write_json(self, path: str, data: Any) -> None:
+        self.objects[path] = json.dumps(data, ensure_ascii=False, allow_nan=False)
+
+    def exists(self, path: str) -> bool:
+        return path in self.objects
+
+
+CELL_DEG = 1.0 / 60.0
+
+
+def east_facing_coast(coast_lon: float = 86.0, slope_m_per_km: float = 1.0, lagoon: bool = False) -> Grid:
+    """Relief with land west of ``coast_lon`` (10 m) and sea east of it deepening linearly offshore, 17-23N.
+
+    ``lagoon`` adds a closed body of water on land, whose shore is not open coast.
+    """
+    lon = 83.0 + (np.arange(420) + 0.5) * CELL_DEG
+    offshore_km = (lon - coast_lon) * 111.0 * np.cos(np.radians(19.5))
+    values = np.tile(np.where(lon < coast_lon, 10.0, -np.maximum(offshore_km, 0.5) * slope_m_per_km), (360, 1))
+    if lagoon:
+        values[150:160, 100:120] = -2.0
+    return Grid(cells=values, north=23.0, west=83.0, cell_deg=CELL_DEG)
 
 
 def make_fixes(n: int = 7, lon: float = 86.0, vmax: float = 100.0, start: datetime = START) -> list[dict[str, Any]]:
@@ -45,9 +80,7 @@ def track(fixes: list[dict[str, Any]]) -> Track:
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(
-        artifact_dir=tmp_path / "artifacts", cache_dir=tmp_path / "cache", max_attempts=2, retry_backoff_s=0.0
-    )
+    return Settings(bucket="test-bucket", cache_dir=tmp_path / "cache", max_attempts=2, retry_backoff_s=0.0)
 
 
 @pytest.fixture

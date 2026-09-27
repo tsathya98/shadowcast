@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
 
 USER_AGENT = "shadowcast-archiver/0.1 (+https://github.com/tsathya98/shadowcast)"
 
@@ -67,8 +66,7 @@ class Settings:
     """Archiver settings resolved from the environment.
 
     Attributes:
-        bucket: GCS bucket name; when unset, artifacts are written under ``local_dir``.
-        local_dir: Local archive root used for development runs without a bucket.
+        bucket: GCS bucket the archive is written to.
         gdacs_lookback_days: How many days of GDACS cyclone events to include per run.
         forecast_days: WeatherNext 2 forecast horizon requested from Open-Meteo.
         http_timeout_s: Per-request timeout in seconds.
@@ -77,8 +75,7 @@ class Settings:
         retry_backoff_s: Base delay for exponential backoff between attempts.
     """
 
-    bucket: str | None = None
-    local_dir: Path = Path("archive")
+    bucket: str = "argmax-cyclone-2026-archive"
     gdacs_lookback_days: int = 10
     forecast_days: int = 10
     http_timeout_s: float = 60.0
@@ -98,8 +95,7 @@ class Settings:
         """
         env = os.environ
         return cls(
-            bucket=env.get("ARCHIVE_BUCKET") or None,
-            local_dir=Path(env.get("ARCHIVE_LOCAL_DIR", cls.local_dir)),
+            bucket=env.get("ARCHIVE_BUCKET") or cls.bucket,
             gdacs_lookback_days=int(env.get("ARCHIVE_GDACS_LOOKBACK_DAYS", cls.gdacs_lookback_days)),
             forecast_days=int(env.get("ARCHIVE_FORECAST_DAYS", cls.forecast_days)),
             http_timeout_s=float(env.get("ARCHIVE_HTTP_TIMEOUT_S", cls.http_timeout_s)),

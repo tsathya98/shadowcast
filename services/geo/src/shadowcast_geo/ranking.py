@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from shadowcast_geo.calibration import OutageModel
-from shadowcast_geo.config import CRITICALITY, LOW_LYING_M
+from shadowcast_geo.config import CRITICALITY, FLOOD_DEPTH_M, LOW_LYING_M
 
 NOTABLE_LOSS_PCT = 10.0  # below this, night-to-night variability dominates the backtest median
 
@@ -136,8 +136,13 @@ def _reasons(
     population = row.get("population")
     if population is not None and np.isfinite(population) and population > 0:
         reasons.append(f"About {population:,.0f} people live within 2 km")
-    elevation = row.get("elevation_m")
-    if elevation is not None and np.isfinite(elevation) and elevation < LOW_LYING_M:
+    elevation, flood = row.get("elevation_m"), row.get("flood_m")
+    if flood is not None and np.isfinite(flood) and flood >= FLOOD_DEPTH_M:
+        reasons.append(
+            f"Storm surge: modelled {row['surge_m']:.1f} m on the coast {row['coast_km']:.0f} km away leaves about "
+            f"{flood:.1f} m of water here (ground {elevation:.1f} m)"
+        )
+    elif elevation is not None and np.isfinite(elevation) and elevation < LOW_LYING_M:
         reasons.append(f"Low-lying: {elevation:.1f} m above sea level (surge and flood exposure)")
     reasons.append(f"Criticality {row['criticality']}/5 as a {KIND_LABELS.get(row['kind'], row['kind'])}")
     return reasons

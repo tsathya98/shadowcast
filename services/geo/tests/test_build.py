@@ -9,17 +9,17 @@ import pytest
 
 from shadowcast_geo import build
 from shadowcast_geo.api import load_scenarios
-from shadowcast_geo.artifacts import LocalArtifacts
 from shadowcast_geo.calibration import OutageModel
 from shadowcast_geo.config import SCENARIOS, Settings
 from shadowcast_geo.ensemble import StormForecast
-from tests.conftest import make_fixes
+from shadowcast_geo.surge import Grid
+from tests.conftest import MemoryArtifacts, east_facing_coast, make_fixes
 
 SUBSTATION_LONS = [86.02, 86.05, 86.1, 86.2, 86.4, 86.8, 87.2, 87.6]
 
 
 @pytest.fixture
-def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> LocalArtifacts:
+def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> MemoryArtifacts:
     """Stub every external input: synthetic track, eight substations and night lights that fade near the track."""
     frame = pd.DataFrame(
         {
@@ -51,6 +51,9 @@ def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> LocalArtifacts:
     def enrich(points: pd.DataFrame) -> pd.DataFrame:
         return points.assign(population=1500.0, elevation_m=4.0)
 
+    def relief(bbox: tuple[float, float, float, float]) -> Grid:
+        return east_facing_coast(coast_lon=(bbox[1] + bbox[3]) / 2)  # a coast through the middle of every region
+
     def initialize(project: str) -> None:
         assert project == "argmax-cyclone-2026"
 
@@ -60,12 +63,17 @@ def pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> LocalArtifacts:
     monkeypatch.setattr(build.earth, "initialize", initialize)
     monkeypatch.setattr(build.earth, "enrich", enrich)
     monkeypatch.setattr(build.earth, "nightlight_loss", nightlights)
-    monkeypatch.setenv("GEO_ARTIFACT_DIR", str(tmp_path / "artifacts"))
-    monkeypatch.delenv("GEO_BUCKET", raising=False)
-    return LocalArtifacts(tmp_path / "artifacts")
+    monkeypatch.setattr(build.earth, "relief", relief)
+    store = MemoryArtifacts()
+
+    def artifact_store(_settings: Settings) -> MemoryArtifacts:
+        return store
+
+    monkeypatch.setattr(build, "artifact_store", artifact_store)
+    return store
 
 
-def test_main_builds_every_scenario(pipeline: LocalArtifacts) -> None:
+def test_main_builds_every_scenario(pipeline: MemoryArtifacts) -> None:
     assert build.main([]) == 0
 
     index = pipeline.read_json("scenarios/index.json")
@@ -89,11 +97,12 @@ def test_main_builds_every_scenario(pipeline: LocalArtifacts) -> None:
     forecast_assets: list[dict[str, Any]] = pipeline.read_json("scenarios/dana-2024/forecasts/20241022T00Z/assets.json")
     assert {"p34", "p64", "wind_p10", "wind_p90", "members", "gale_arrival"} <= set(forecast_assets[0])
     assert forecast_assets[0]["members"] == 4
+    assert "flood_m" not in forecast_assets[0]  # no hindsight surge in a forecast replay
     tracks = pipeline.read_json("scenarios/dana-2024/forecasts/20241022T00Z/tracks.json")
     assert [t["member"] for t in tracks] == [1, 2, 3, 4]
 
 
-def test_build_output_satisfies_api_schemas(pipeline: LocalArtifacts) -> None:
+def test_build_output_satisfies_api_schemas(pipeline: MemoryArtifacts) -> None:
     build.main([])
 
     loaded = load_scenarios(pipeline)  # validates every artifact against the API response models
@@ -106,6 +115,13 @@ def test_build_output_satisfies_api_schemas(pipeline: LocalArtifacts) -> None:
     assets: list[dict[str, Any]] = pipeline.read_json("scenarios/fani-2019/assets.json")
     assert [a["rank"] for a in assets] == list(range(1, 10))
     assert assets[0]["peak_time"].endswith("Z")
+    assert {"coast_km", "surge_m", "flood_m"} <= set(assets[0])
+    surge = pipeline.read_json("scenarios/fani-2019/surge.json")
+    summary = pipeline.read_json("scenarios/fani-2019/scenario.json")["surge"]
+    assert len(surge) == summary["coast_points"] > 0
+    assert summary["peak_m"] == max(p["peak_m"] for p in surge if p["peak_m"] is not None) > 0
+    assert summary["flooded_sites"] >= 0 and summary["time"].endswith("Z")
+    assert summary["observed"]["place"] == "Puri coast" and summary["observed"]["modelled_m"] is not None
     assert {a["kind"] for a in assets if a["observed_loss_pct"] is None} == {"cyclone_shelter"}
     backtest = pipeline.read_json("scenarios/fani-2019/backtest.json")
     assert len(backtest["substations"]) == 8
@@ -113,7 +129,7 @@ def test_build_output_satisfies_api_schemas(pipeline: LocalArtifacts) -> None:
     assert pipeline.read_json("scenarios/fani-2019/track.json") == make_fixes(start=fani_start)
 
 
-def test_main_rebuilds_one_scenario_with_stored_model(pipeline: LocalArtifacts) -> None:
+def test_main_rebuilds_one_scenario_with_stored_model(pipeline: MemoryArtifacts) -> None:
     build.main(["fani-2019"])
 
     assert build.main(["dana-2024"]) == 0
@@ -121,13 +137,13 @@ def test_main_rebuilds_one_scenario_with_stored_model(pipeline: LocalArtifacts) 
     assert [entry["id"] for entry in pipeline.read_json("scenarios/index.json")] == ["fani-2019", "dana-2024"]
 
 
-def test_main_rejects_unknown_scenario(pipeline: LocalArtifacts) -> None:
+def test_main_rejects_unknown_scenario(pipeline: MemoryArtifacts) -> None:
     with pytest.raises(SystemExit):
         build.main(["atlantis-2030"])
 
 
 def test_forecasts_need_landfall_inside_best_track(
-    pipeline: LocalArtifacts, settings: Settings, model: OutageModel, monkeypatch: pytest.MonkeyPatch
+    pipeline: MemoryArtifacts, settings: Settings, model: OutageModel, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def track_from_2019(*_: object) -> list[dict[str, Any]]:
         return make_fixes()  # 2019 track, 2024 landfall
@@ -139,7 +155,7 @@ def test_forecasts_need_landfall_inside_best_track(
         build.build_scenario(SCENARIOS["dana-2024"], client, settings, pipeline, model)
 
 
-def test_non_reference_scenario_requires_model(pipeline: LocalArtifacts, settings: Settings) -> None:
+def test_non_reference_scenario_requires_model(pipeline: MemoryArtifacts, settings: Settings) -> None:
     with httpx.Client() as client, pytest.raises(ValueError, match="needs the reference outage model"):
         build.build_scenario(SCENARIOS["dana-2024"], client, settings, pipeline, None)
 

@@ -85,8 +85,8 @@ Interactive docs are at `/docs`.
 ```bash
 uv sync --all-extras
 uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest
-uv run python -m shadowcast_geo.build                  # writes ./artifacts (needs gcloud ADC with Earth Engine)
-GEO_ARTIFACT_DIR=artifacts uv run uvicorn shadowcast_geo.api:create_app --factory --reload
+uv run python -m shadowcast_geo.build                  # writes to gs://$GEO_BUCKET (gcloud ADC with Earth Engine)
+uv run uvicorn shadowcast_geo.api:create_app --factory --reload   # serves from the same bucket
 ```
 
-Deploy with [`infra/geo.sh --publish`](../../infra/geo.sh).
+Artifacts live only in Cloud Storage (`GEO_BUCKET`, default `argmax-cyclone-2026-scenarios`): the build writes there and the API loads from there. Deploy with [`infra/geo.sh`](../../infra/geo.sh).

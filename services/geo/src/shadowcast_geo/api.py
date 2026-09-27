@@ -33,6 +33,7 @@ from shadowcast_geo.models import (
     ScenarioDetail,
     ScenarioSummary,
     StormPosition,
+    SurgePoint,
     TimelinePoint,
 )
 
@@ -65,6 +66,7 @@ class LoadedScenario:
         lat: Asset latitudes in rank order.
         lon: Asset longitudes in rank order.
         backtest: Backtest artifact.
+        surge: Peak modelled surge along the open coast.
         forecasts: Ensemble forecast replays keyed by forecast key.
     """
 
@@ -76,6 +78,7 @@ class LoadedScenario:
     lat: NDArray[np.float64]
     lon: NDArray[np.float64]
     backtest: dict[str, Any]
+    surge: list[SurgePoint]
     forecasts: dict[str, LoadedForecast]
 
 
@@ -147,6 +150,7 @@ def load_scenarios(store: ArtifactStore) -> dict[str, LoadedScenario]:
             lat=np.array([asset.lat for asset in assets]),
             lon=np.array([asset.lon for asset in assets]),
             backtest=store.read_json(f"{prefix}/backtest.json"),
+            surge=[SurgePoint.model_validate(point) for point in store.read_json(f"{prefix}/surge.json")],
             forecasts=forecasts,
         )
     return loaded
@@ -289,6 +293,12 @@ async def hazard(scenario: ScenarioDep, at: Annotated[datetime, Query(descriptio
 async def backtest(scenario: ScenarioDep) -> dict[str, Any]:
     """Predicted outage probability vs observed night-light loss per substation, with skill metrics."""
     return scenario.backtest
+
+
+@router.get("/scenarios/{scenario_id}/surge")
+async def surge(scenario: ScenarioDep) -> list[SurgePoint]:
+    """Peak modelled storm surge at every open-coast point of the region (best track)."""
+    return scenario.surge
 
 
 @router.get("/scenarios/{scenario_id}/forecasts")

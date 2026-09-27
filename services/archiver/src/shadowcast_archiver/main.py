@@ -13,7 +13,7 @@ import httpx
 
 from shadowcast_archiver.config import USER_AGENT, Settings
 from shadowcast_archiver.sources import JSON, SOURCES, Artifact, FetchContext, Source
-from shadowcast_archiver.storage import ArtifactStore, GcsStore, LocalStore
+from shadowcast_archiver.storage import ArtifactStore, GcsStore
 
 logger = logging.getLogger("shadowcast_archiver")
 
@@ -89,8 +89,7 @@ def main() -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)  # one INFO line per request would drown the run summary
 
     settings = Settings.from_env()
-    store = GcsStore(settings.bucket) if settings.bucket else LocalStore(settings.local_dir)
-    manifest = asyncio.run(run(settings, store))
+    manifest = asyncio.run(run(settings, GcsStore(settings.bucket)))
     succeeded = [name for name, status in manifest["sources"].items() if status["status"] == "ok"]
     logger.info("run %s finished: %d/%d sources ok", manifest["run_at"], len(succeeded), len(manifest["sources"]))
     return 0 if succeeded else 1

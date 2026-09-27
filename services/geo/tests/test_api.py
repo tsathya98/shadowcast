@@ -6,9 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from shadowcast_geo.api import create_app
-from shadowcast_geo.artifacts import LocalArtifacts
 from shadowcast_geo.config import Settings
-from tests.conftest import make_fixes
+from tests.conftest import MemoryArtifacts, make_fixes
 
 
 def _asset(asset_id: str, rank: int, kind: str, score: float, lon: float, name: str | None = None) -> dict[str, Any]:
@@ -22,8 +21,8 @@ def _asset(asset_id: str, rank: int, kind: str, score: float, lon: float, name: 
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> LocalArtifacts:
-    artifacts = LocalArtifacts(tmp_path)
+def store() -> MemoryArtifacts:
+    artifacts = MemoryArtifacts()
     region = {"id": "odisha-coast", "name": "Odisha coast", "bbox": [19.0, 84.4, 21.7, 87.6]}
     summary = {"id": "fani-2019", "storm": "Fani", "season": 2019, "region": region,
                "landfall": "2019-05-03T03:30:00Z", "peak_vmax_kt": 150.0}  # fmt: skip
@@ -32,6 +31,8 @@ def store(tmp_path: Path) -> LocalArtifacts:
         **summary, "track_source": "IBTrACS best track", "asset_counts": {"hospital": 1, "school": 1},
         "model": {"intercept": -12.8, "slope": 0.128}, "skill": {"auc": 0.91, "out_of_sample": False},
         "loss_by_band": [{"low_kt": 100.0, "high_kt": 130.0, "n": 36.0, "median": 82.0}],
+        "surge": {"peak_m": 1.5, "lat": 19.8, "lon": 85.8, "time": "2019-05-03T03:00:00Z", "coast_points": 1,
+                  "flooded_sites": 0, "method": "1D wind setup"},
         "forecasts": [{"key": "20190501T12Z", "issued": "2019-05-01T12:00:00Z", "lead_h": 39.5, "storm_id": "01B",
                        "members": 52, "assets_likely_gale": 1, "assets_likely_hurricane": 0, "max_p_outage": 0.4,
                        "source": "ECMWF IFS ensemble"}],
@@ -43,6 +44,10 @@ def store(tmp_path: Path) -> LocalArtifacts:
         _asset("osm:way/2", 2, "school", 0.36, 86.4),
     ])  # fmt: skip
     artifacts.write_json("scenarios/fani-2019/backtest.json", {"skill": {"auc": 0.91}, "substations": []})
+    artifacts.write_json("scenarios/fani-2019/surge.json", [
+        {"lat": 19.8, "lon": 85.8, "peak_m": 1.5, "setup_m": 0.8, "barometer_m": 0.7,
+         "peak_time": "2019-05-03T03:00:00Z"},
+    ])  # fmt: skip
     forecast_asset = {**_asset("osm:node/1", 1, "hospital", 0.4, 86.05), "p34": 0.9, "p64": 0.25, "wind_p10": 40.0,
                       "wind_p90": 80.0, "members": 52, "gale_arrival": "2019-05-02T18:00:00Z"}  # fmt: skip
     artifacts.write_json("scenarios/fani-2019/forecasts/20190501T12Z/assets.json", [forecast_asset])
@@ -54,7 +59,7 @@ def store(tmp_path: Path) -> LocalArtifacts:
 
 
 @pytest.fixture
-def client(store: LocalArtifacts) -> Iterator[TestClient]:
+def client(store: MemoryArtifacts) -> Iterator[TestClient]:
     with TestClient(create_app(Settings(allowed_origins=("https://shadowcast.test",)), store)) as test_client:
         yield test_client
 
@@ -121,6 +126,11 @@ def test_hazard_snapshot(client: TestClient) -> None:
     assert outside["wind_kt"] == [0.0, 0.0]
 
 
+def test_surge(client: TestClient) -> None:
+    assert client.get("/scenarios/fani-2019/surge").json()[0]["peak_m"] == 1.5
+    assert client.get("/scenarios/fani-2019").json()["surge"]["peak_m"] == 1.5
+
+
 def test_backtest_and_cors_and_gzip(client: TestClient) -> None:
     response = client.get("/scenarios/fani-2019/backtest", headers={"Origin": "https://shadowcast.test"})
 
@@ -144,7 +154,7 @@ def test_not_found(client: TestClient, path: str) -> None:
 
 
 def test_empty_store_serves_no_scenarios(tmp_path: Path) -> None:
-    with TestClient(create_app(Settings(), LocalArtifacts(tmp_path))) as empty:
+    with TestClient(create_app(Settings(), MemoryArtifacts())) as empty:
         assert empty.get("/health").json() == {"status": "ok", "scenarios": []}
         assert empty.get("/scenarios").json() == []
 

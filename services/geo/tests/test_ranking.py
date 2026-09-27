@@ -55,6 +55,20 @@ def test_reasons_cover_every_signal(model: OutageModel) -> None:
     assert reasons["d"] == ["No modelled wind at this location for this storm"]
 
 
+def test_surge_reason_replaces_low_lying(model: OutageModel) -> None:
+    frame = _frame(
+        elevation_m=[0.4, 12.0, np.nan, 1.0], coast_km=[2.0] * 4, surge_m=[1.8] * 4, flood_m=[1.1, 0.0, np.nan, 0.0]
+    )
+
+    ranked = rank_assets(frame, model, LANDFALL, BANDS)
+    school = ranked.loc[ranked["asset_id"] == "a", "reasons"].iloc[0]
+
+    assert (
+        "Storm surge: modelled 1.8 m on the coast 2 km away leaves about 1.1 m of water here (ground 0.4 m)" in school
+    )
+    assert not any(r.startswith("Low-lying") for r in school)
+
+
 def test_rank_without_population_or_band_match(model: OutageModel) -> None:
     frame = _frame(peak_wind_kt=[70.0, 70.0, 70.0, 70.0]).drop(columns=["population", "elevation_m"])
 

@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from shadowcast_geo.config import SCENARIOS, Settings
@@ -14,14 +12,12 @@ def test_from_env_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_from_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GEO_BUCKET", "scenarios-bucket")
-    monkeypatch.setenv("GEO_ARTIFACT_DIR", "/tmp/a")
     monkeypatch.setenv("GEO_ALLOWED_ORIGINS", "https://shadowcast.vercel.app, http://localhost:3000")
     monkeypatch.setenv("GEO_MAX_ATTEMPTS", "4")
 
     settings = Settings.from_env()
 
     assert settings.bucket == "scenarios-bucket"
-    assert settings.artifact_dir == Path("/tmp/a")
     assert settings.allowed_origins == ("https://shadowcast.vercel.app", "http://localhost:3000")
     assert settings.max_attempts == 4
 

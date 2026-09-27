@@ -25,6 +25,7 @@ from shadowcast_geo import earth
 from shadowcast_geo.artifacts import ArtifactStore, artifact_store
 from shadowcast_geo.calibration import OutageModel, evaluate, fit_outage_model, loss_by_band, spatial_holdout
 from shadowcast_geo.config import (
+    FLOOD_DEPTH_M,
     HOLDOUT_FOLDS,
     LIT_RADIANCE,
     LOSS_BANDS_KT,
@@ -38,6 +39,7 @@ from shadowcast_geo.ensemble import ensemble_impact, load_ensemble, select_storm
 from shadowcast_geo.hazard import Track, exposure, track_position
 from shadowcast_geo.inputs import load_assets, load_best_track
 from shadowcast_geo.ranking import rank_assets
+from shadowcast_geo.surge import coast_from_grid, coastal_surge, inundation
 
 logger = logging.getLogger("shadowcast_geo.build")
 
@@ -61,19 +63,36 @@ ASSET_FIELDS = [
     "gale_arrival",
     "population",
     "elevation_m",
+    "coast_km",
+    "surge_m",
+    "flood_m",
     "criticality",
     "p_outage",
     "score",
     "observed_loss_pct",
     "reasons",
 ]
-FORECAST_FIELDS = [*ASSET_FIELDS, "p34", "p64", "wind_p10", "wind_p90", "members"]
+SURGE_FIELDS = ["lat", "lon", "peak_m", "setup_m", "barometer_m", "peak_time"]
+# Surge is modelled on the best track only: a forecast replay must not carry hindsight.
+FORECAST_FIELDS = [f for f in ASSET_FIELDS if f not in ("coast_km", "surge_m", "flood_m")] + [
+    "p34",
+    "p64",
+    "wind_p10",
+    "wind_p90",
+    "members",
+]
 STATIC_FIELDS = ["asset_id", "kind", "name", "source", "lat", "lon", "population", "elevation_m", "observed_loss_pct"]
 ROUNDING = {
     "peak_wind_kt": 1,
     "min_dist_km": 1,
     "population": 0,
     "elevation_m": 1,
+    "coast_km": 1,
+    "surge_m": 2,
+    "flood_m": 2,
+    "peak_m": 2,
+    "setup_m": 2,
+    "barometer_m": 2,
     "p_outage": 4,
     "p34": 3,
     "p64": 3,
@@ -184,6 +203,49 @@ def build_forecasts(
     return summaries
 
 
+def model_surge(
+    scenario: Scenario, track: Track, assets: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Model the storm surge along a scenario's open coast and at every asset, and compare it with IMD's report.
+
+    Args:
+        scenario: The scenario (region and IMD surge report).
+        track: The best track.
+        assets: Assets with ``lat``, ``lon`` and ``elevation_m``.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]: Assets with ``coast_km``, ``surge_m`` and ``flood_m``;
+        the peak surge per coast point; and the surge summary for the scenario index.
+    """
+    bbox = scenario.region.bbox
+    coast = coast_from_grid(earth.relief(bbox), bbox)
+    coastal = coastal_surge(coast, track)
+    lat, lon = assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float)
+    assets = assets.assign(
+        **inundation(lat, lon, assets["elevation_m"].to_numpy(dtype=float), coast, coastal["peak_m"])
+    )
+    crest = int(np.nanargmax(coastal["peak_m"]))
+    observed: dict[str, Any] | None = None
+    if report := scenario.surge_report:
+        south, west, north, east = report.bbox
+        stretch = (coast.lat >= south) & (coast.lat <= north) & (coast.lon >= west) & (coast.lon <= east)
+        observed = {
+            **{k: v for k, v in vars(report).items() if k != "bbox"},
+            "modelled_m": round(float(np.nanmax(coastal["peak_m"][stretch])), 2) if stretch.any() else None,
+        }
+    summary = {
+        "peak_m": round(float(coastal["peak_m"][crest]), 2),
+        "lat": round(float(coast.lat[crest]), 3),
+        "lon": round(float(coast.lon[crest]), 3),
+        "time": f"{np.datetime_as_string(coastal['peak_time'][crest], unit='s')}Z",
+        "coast_points": int(coast.lat.size),
+        "flooded_sites": int((assets["flood_m"] >= FLOOD_DEPTH_M).sum()),
+        "method": "1D wind setup over ETOPO1 shelf transects plus inverse barometer; no tide, waves or rivers",
+        "observed": observed,
+    }
+    return assets, pd.DataFrame({"lat": coast.lat, "lon": coast.lon, **coastal}), summary
+
+
 def build_scenario(
     scenario: Scenario, client: httpx.Client, settings: Settings, store: ArtifactStore, model: OutageModel | None
 ) -> tuple[OutageModel, dict[str, Any]]:
@@ -206,8 +268,9 @@ def build_scenario(
     fixes = load_best_track(client, settings, scenario.storm, scenario.season)
     track = Track.from_records(fixes)
     assets = load_assets(client, settings, scenario.region)
-    hazard = exposure(assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float), track)
-    assets = earth.enrich(assets.assign(**hazard))
+    lat, lon = assets["lat"].to_numpy(dtype=float), assets["lon"].to_numpy(dtype=float)
+    assets = earth.enrich(assets.assign(**exposure(lat, lon, track)))
+    assets, surge_points, surge = model_surge(scenario, track, assets)
 
     substations = assets[assets["kind"] == "substation"]
     truth = substations[["asset_id", "lat", "lon", "peak_wind_kt"]].join(
@@ -264,6 +327,7 @@ def build_scenario(
             "model": model.to_dict(),
             "skill": skill,
             "loss_by_band": bands,
+            "surge": surge,
             "forecasts": forecasts,
             "built_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
@@ -272,6 +336,7 @@ def build_scenario(
     store.write_json(f"{prefix}/scenario.json", summary)
     store.write_json(f"{prefix}/track.json", fixes)
     store.write_json(f"{prefix}/assets.json", frame_records(ranked, ASSET_FIELDS))
+    store.write_json(f"{prefix}/surge.json", frame_records(surge_points, SURGE_FIELDS))
     store.write_json(
         f"{prefix}/backtest.json",
         {
