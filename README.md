@@ -52,12 +52,12 @@ flowchart LR
 
 | Step | What happens |
 |---|---|
-| **Predict** | The track (IBTrACS best track, or each ECMWF ensemble forecast *as issued*) drives a Holland (1980) parametric wind field at every site, densified to 15-minute steps, and a storm-surge model along the coast |
+| **Predict** | The track (IBTrACS best track, or each ECMWF ensemble forecast *as issued*) drives a Holland (1980) parametric wind field at every site, densified to 15-minute steps, R-CLIPER storm rain, and a storm-surge model along the coast |
 | **Prioritise** | Sites are ranked by calibrated outage probability × criticality (hospitals and shelters 5, substations 4, …, schools 2). Every rank carries plain-language reasons |
 | **Prepare** | Gemini drafts officer actions and a public CAP 1.2 advisory in English, Hindi and the region's language. **Nothing is issued without an officer's approval**, and every decision is audited |
-| **Prove** | NASA VIIRS night-light loss is measured around every lit substation after landfall. Skill (ROC AUC, Brier, Spearman) and failures are published per storm |
+| **Prove** | NASA VIIRS night-light loss is measured around every lit substation after landfall, and Gemini reads the before/after satellite images. Rain is scored against NASA GPM and surge against IMD. Skill and failures are published per storm |
 
-The console opens on the **Brief** tab: the situation in two sentences, exception tiles (sites at risk, how many gales have reached, the next site in line), recommended actions per agency (health, power utility, district administration, water supply, police and fire), each due before gales reach its first site, and the latest officer decisions from the audit log. The Brief is computed from the ranked sites, not by Gemini, and it updates as you scrub the timeline.
+The console opens on the **Brief** tab: a **live** card with the cyclones GDACS is tracking and the official NDMA SACHET warnings in force for the region's state right now, **IMD's own bulletin as Gemini read it from the PDF**, the situation in two sentences, exception tiles (sites at risk, how many gales have reached, the next site in line), recommended actions per agency (health, power utility, district administration, water supply, police and fire), each due before gales reach its first site, an evacuation action for sites the surge would flood, **anticipatory finance** (an illustrative parametric cover per district, with its trigger time, or its odds of paying out under a forecast), and the latest officer decisions from the audit log. The numbers are computed from the ranked sites, not by Gemini, and they update as you scrub the timeline.
 
 <table>
   <tr>
@@ -105,6 +105,23 @@ The outage model is fitted once, on Fani (2019), then scored without refitting. 
 <p align="center">
   <img width="60%" src="docs/images/fani-light-loss.png" alt="Fani 2019 median night-light loss at substations by modelled peak wind: below 60 kt about 0 %, 60 to 80 kt about 0 %, 80 to 100 kt 2 %, 100 to 130 kt 77 %">
 </p>
+
+### Storm rain vs NASA GPM
+
+Rain is the R-CLIPER parametric rain profile (Tuleya et al. 2007) accumulated along the track every 15 minutes, for the best track and for every ensemble member (giving the odds of 204.5 mm or more, IMD's "extremely heavy" threshold). It is scored at every site against NASA GPM IMERG V07 storm totals:
+
+| Storm | Rank correlation with GPM | Model ÷ satellite (median) |
+|---|---|---|
+| Fani 2019 | 0.72 | 1.25 |
+| Hudhud 2014 | 0.85 | 1.05 |
+| Dana 2024 | 0.96 | 1.09 |
+| Amphan 2020 | 0.14 | 1.36 |
+
+Amphan is again the hard case: its rain fell far from where a symmetric, track-following model puts it.
+
+### Parametric cover and basis risk
+
+An illustrative district trigger (index = wind reached at a quarter of the district's sites; pays 25, 50 or 100 % at 64, 83 or 96 kt) turns the same hazard into anticipatory finance. On the best track ShadowCast reports when each district triggered and checks it against the satellites: in Fani, districts that triggered lost power at 18 % of their lit substations and districts that did not, at 0 %. Under an as-issued ensemble forecast it gives each district's probability of a payout days before landfall, the basis of forecast-based financing.
 
 ### Storm surge vs IMD
 
@@ -162,6 +179,7 @@ The **Prepare** tab is an agent on **Gemini 3.8 Flash on Vertex AI** (AI SDK `To
 | **Tools** | `searchAssets` queries the geo API, scoped to the replay being viewed. `officialBulletin` returns IMD's bulletin for the storm. `issueAdvisory` drafts officer actions per site plus a public **CAP 1.2** message in English, Hindi and the region's language (Odia, Telugu or Bengali), validated against a schema |
 | **Reads IMD's PDFs** | Gemini reads each storm's last archived pre-landfall IMD national bulletin straight from the PDF into a validated schema (position, wind, landfall, surge and districts, rainfall, expected damage, IMD's actions), cached in Firestore. The Brief shows it next to ShadowCast's numbers, and the analyst keeps advisories consistent with it: **IMD is the authority** |
 | **Hears and sees** | The officer can ask by voice in any language (recorded in the browser, re-encoded as 16 kHz WAV and heard by Gemini directly, no separate speech-to-text), or attach a field photo, a PDF or an audio clip |
+| **Reads the satellites** | Gemini compares the region's VIIRS night lights before and after the storm (rendered by Earth Engine on one scale) and reports where the lights went out, how badly, what stayed lit and whether that agrees with ShadowCast's forecast. For Fani: Khordha, Puri and Cuttack totally dark, which agrees |
 | **Human in the loop** | `issueAdvisory` needs an officer's approval on a card. Approvals are HMAC-signed so they cannot be forged; rejections are recorded too |
 | **Audit** | Every decision is written once to an append-only **Firestore** audit log; approved advisories download as CAP XML |
 | **Voice** | **Gemini 2.5 Flash TTS** reads approved advisories aloud in each language (classic Cloud Text-to-Speech has no Odia voice) |
@@ -177,12 +195,12 @@ flowchart LR
 
     subgraph vercel["Vercel"]
         web["Next.js 16 console<br/>Google Maps + deck.gl"]
-        routes["Agent routes<br/>/api/agent · /api/advisories · /api/bulletins"]
+        routes["Agent routes<br/>/api/agent · /api/advisories<br/>/api/bulletins · /api/evidence"]
     end
 
     subgraph gcp["Google Cloud"]
         vertex["Vertex AI<br/>Gemini 3.8 Flash<br/>Gemini 2.5 Flash TTS"]
-        fs[("Firestore<br/>audit log · bulletin readings")]
+        fs[("Firestore<br/>audit log · Gemini readings")]
         geo["Cloud Run<br/>geo API (FastAPI)"]
         gcs[("Cloud Storage<br/>built scenarios")]
         job["Cloud Run Job<br/>archiver, every 6 h"]
@@ -191,7 +209,7 @@ flowchart LR
 
     subgraph offline["Offline build · python -m shadowcast_geo.build"]
         src["IBTrACS · ECMWF open data ensemble<br/>OpenStreetMap + OSDMA shelters"]
-        ee["Earth Engine<br/>VIIRS night lights · WorldPop · DeltaDTM · ETOPO1"]
+        ee["Earth Engine<br/>VIIRS · GPM IMERG · WorldPop<br/>DeltaDTM · ETOPO1 · geoBoundaries"]
     end
 
     feeds["GDACS · NDMA SACHET<br/>IBTrACS · Open-Meteo"]
@@ -207,6 +225,7 @@ flowchart LR
     src --> gcs
     ee --> gcs
     feeds --> job --> archive
+    archive -->|"/live"| geo
     imd -->|"read by Gemini"| routes
 
     classDef accent fill:#16191c,stroke:#F28A2E,color:#ffffff
@@ -247,6 +266,8 @@ On the Odisha coast the 3,325 sites are 765 official OSDMA cyclone shelters plus
 | [DeltaDTM](https://doi.org/10.1038/s41597-024-03091-9) (Pronk et al. 2024) | Bare-earth coastal ground elevation, for surge flooding | CC BY 4.0 |
 | [Copernicus DEM GLO-30](https://spacedata.copernicus.eu/collections/copernicus-digital-elevation-model) | Elevation inland, beyond DeltaDTM | Copernicus DEM licence |
 | [ETOPO1](https://www.ncei.noaa.gov/products/etopo-global-relief-model) (NOAA) | Shelf bathymetry for the surge transects | NOAA open data |
+| [NASA GPM IMERG V07](https://gpm.nasa.gov/data/imerg) | Satellite storm-total rainfall, the rain truth | NASA open data |
+| [geoBoundaries](https://www.geoboundaries.org/) ADM2 | District boundaries for the parametric cover | CC BY 4.0 |
 | [IMD / RSMC New Delhi](https://rsmcnewdelhi.imd.gov.in/) bulletins and reports | Official forecasts read by Gemini; observed surge for validation | IMD |
 | [NASA VIIRS VNP46A2](https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/VNP46A2/) (Black Marble) | Night-light truth before vs after landfall | NASA open data |
 | [GDACS](https://www.gdacs.org/) (EC JRC / UN OCHA) | Archived as-issued forecast cones | GDACS terms |
@@ -285,7 +306,7 @@ On the Odisha coast the 3,325 sites are 765 official OSDMA cyclone shelters plus
 | Layer | Technology |
 |---|---|
 | AI | Gemini 3.8 Flash on Vertex AI (duty analyst with tools; PDF, image and audio input; structured output), Gemini 2.5 Flash TTS |
-| Geospatial | Google Earth Engine (VIIRS, WorldPop, DeltaDTM, Copernicus DEM, ETOPO1), ecCodes for ECMWF track files |
+| Geospatial | Google Earth Engine (VIIRS, GPM IMERG, WorldPop, DeltaDTM, Copernicus DEM, ETOPO1, geoBoundaries), ecCodes for ECMWF track files |
 | Backend | Python 3.12, FastAPI, uv, Cloud Run service and Cloud Run Job, Cloud Storage |
 | Frontend | Next.js 16 (App Router), React 19, Tailwind 4, Google Maps Platform + deck.gl, SWR |
 | Data and audit | Firestore (append-only advisory audit log, bulletin readings), Cloud Storage (scenarios, archive) |
@@ -344,7 +365,7 @@ Deploy with [`infra/archiver.sh`](infra/archiver.sh).
 
 ## Roadmap
 
-In progress: rainfall · parametric insurance triggers · arterial roads · Gemini reading before/after satellite imagery · live feed.
+In progress: arterial roads and shelter access · evacuation routing.
 
 ## Team and licence
 
