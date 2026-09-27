@@ -15,6 +15,10 @@ It turns a cyclone track into a **ranked, explained list of the assets that are 
 | Truth | VIIRS VNP46A2 raw radiance, masked to high-quality retrievals, before vs after landfall within 1.5 km of each substation. The gap-filled band is avoided because it carries pre-storm values into cloudy post-storm nights |
 | Model | `P(outage) = logistic(a + b · peak wind)`, fitted on Fani. An asset "lost power" when its light fell by at least 50 % |
 | Priority | `score = P(outage) × criticality / 5`, where criticality is hospitals and shelters 5, substations 4, …, schools 2. Every rank carries plain-language reasons |
+| Surge (`surge.py`) | Coast-normal transects from every open-coast cell of ETOPO1 to the 100 m shelf edge; the steady 1D wind-setup equation integrated shoreward with the Holland onshore stress (Garratt drag capped at 2.5e-3) plus the inverse barometer from Holland's wind-pressure relation; the crest carried inland at 1 m per 14.5 km against bare-earth DeltaDTM ground. Compared with IMD's reported surge per storm |
+| Rain (`hazard.py`) | R-CLIPER rain rate (Tuleya et al. 2007) summed over the densified track, per member in forecasts; scored against NASA GPM IMERG V07 storm totals at every asset |
+| Parametric cover (`insurance.py`) | District index = wind reached at 25 % of a district's sites (geoBoundaries ADM2); payouts 25/50/100 % at 64/83/96 kt. Best track: trigger time and a basis-risk check against satellite outages. Forecast: probability of a payout from every member |
+| Evidence and live (`earth.py`, `live.py`) | Before/after VIIRS night-light PNGs per region on one scale, for Gemini to read; `/live` digests the feed archiver's newest GDACS and NDMA SACHET run |
 
 ## As-issued ensemble replay
 
@@ -60,7 +64,7 @@ At 44 h the top priorities are Mahakalapada shelters and Paradip hospitals: 94-9
 - The outage model has one feature (wind). Grid topology, pole age and pre-emptive shutdowns are not modelled. It was calibrated on one storm and one state.
 - Night-light loss is a proxy for grid outage. Clouds, the moon and festivals add noise, which is handled by medians, the quality mask and the 50 % threshold.
 - Best-track replays are hindsight, so lead times are short; the ensemble replay removes this. Ensemble intensity is biased low and is not corrected; it feeds `P(outage)` unchanged.
-- Storm surge is not yet in the score. Elevation is reported per asset as evidence.
+- Surge is a screening model (no tide, waves, rivers or alongshore flow) and runs high on narrow shelves; rain is a symmetric climatology-persistence profile. Neither changes the outage score.
 
 ## API
 
@@ -74,6 +78,9 @@ At 44 h the top priorities are Mahakalapada shelters and Paradip hospitals: 94-9
 | `GET /scenarios/{id}/assets/{asset_id}` | One asset with its 15-minute wind timeline |
 | `GET /scenarios/{id}/hazard?at=` | Wind at every asset, plus the storm position, at one moment |
 | `GET /scenarios/{id}/backtest` | Predicted vs observed per substation, with skill |
+| `GET /scenarios/{id}/surge` | Peak modelled surge per open-coast point (wind setup and inverse barometer) |
+| `GET /scenarios/{id}/evidence/{night-lights-pre,night-lights-post}.png` | Before/after VIIRS night-light images of the region |
+| `GET /live` | GDACS cyclones and NDMA SACHET warnings from the feed archiver's newest run (cached 15 min) |
 | `GET /scenarios/{id}/forecasts` | As-issued ensemble forecasts replayed (issue time, lead, members) |
 | `GET /scenarios/{id}/forecasts/{key}/tracks` | Ensemble member tracks as GeoJSON (the "spaghetti plot") |
 | `GET /scenarios/{id}/forecasts/{key}/assets?kind=&min_score=&limit=&offset=` | Assets ranked under that forecast: `p34`, `p64`, wind percentiles, gale arrival and reasons |
