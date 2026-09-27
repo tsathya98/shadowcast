@@ -72,8 +72,10 @@ PAYOUT_TIERS_KT = ((64.0, 0.25), (83.0, 0.5), (96.0, 1.0))
 # Arterial roads (see roads.py): OSM classes kept, sampling step, and the winds that cut a road or put it at risk.
 ROAD_HIGHWAYS = ("motorway", "trunk", "primary")
 ROAD_SAMPLE_KM = 1.0
-ROAD_CUT_KT = 64.0  # hurricane force: IMD warns of uprooted trees and poles and disrupted road links
-ROAD_RISK_KT = 50.0  # storm force: tree branches and debris
+# IMD's damage classes: an extremely severe cyclonic storm (90 kt and above) brings "disruption of rail/road link at
+# several places"; from very severe (64 kt) roads take damage and travel becomes unsafe.
+ROAD_CUT_KT = 90.0
+ROAD_RISK_KT = 64.0
 ACCESS_RADIUS_KM = 10.0  # a site further than this from an arterial road has no arterial access listed
 
 # Storm surge screening model (see surge.py).

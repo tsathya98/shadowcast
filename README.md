@@ -52,12 +52,12 @@ flowchart LR
 
 | Step | What happens |
 |---|---|
-| **Predict** | The track (IBTrACS best track, or each ECMWF ensemble forecast *as issued*) drives a Holland (1980) parametric wind field at every site, densified to 15-minute steps, R-CLIPER storm rain, and a storm-surge model along the coast |
+| **Predict** | The track (IBTrACS best track, or each ECMWF ensemble forecast *as issued*) drives a Holland (1980) parametric wind field at every site, densified to 15-minute steps, R-CLIPER storm rain, a storm-surge model along the coast, and the same hazard along every arterial road |
 | **Prioritise** | Sites are ranked by calibrated outage probability × criticality (hospitals and shelters 5, substations 4, …, schools 2). Every rank carries plain-language reasons |
 | **Prepare** | Gemini drafts officer actions and a public CAP 1.2 advisory in English, Hindi and the region's language. **Nothing is issued without an officer's approval**, and every decision is audited |
 | **Prove** | NASA VIIRS night-light loss is measured around every lit substation after landfall, and Gemini reads the before/after satellite images. Rain is scored against NASA GPM and surge against IMD. Skill and failures are published per storm |
 
-The console opens on the **Brief** tab: a **live** card with the cyclones GDACS is tracking and the official NDMA SACHET warnings in force for the region's state right now, **IMD's own bulletin as Gemini read it from the PDF**, the situation in two sentences, exception tiles (sites at risk, how many gales have reached, the next site in line), recommended actions per agency (health, power utility, district administration, water supply, police and fire), each due before gales reach its first site, an evacuation action for sites the surge would flood, **anticipatory finance** (an illustrative parametric cover per district, with its trigger time, or its odds of paying out under a forecast), and the latest officer decisions from the audit log. The numbers are computed from the ranked sites, not by Gemini, and they update as you scrub the timeline.
+The console opens on the **Brief** tab: a **live** card with the cyclones GDACS is tracking and the official NDMA SACHET warnings in force for the region's state right now, **IMD's own bulletin as Gemini read it from the PDF**, the situation in two sentences, exception tiles (sites at risk, how many gales have reached, the next site in line), recommended actions per agency (health, power utility, district administration, water supply, police and fire), each due before gales reach its first site, an evacuation action for sites the surge would flood, a public-works action for the arterial roads that will be cut (due before the first one closes), **anticipatory finance** (an illustrative parametric cover per district, with its trigger time, or its odds of paying out under a forecast), and the latest officer decisions from the audit log. The numbers are computed from the ranked sites, not by Gemini, and they update as you scrub the timeline.
 
 <table>
   <tr>
@@ -122,6 +122,10 @@ Amphan is again the hard case: its rain fell far from where a symmetric, track-f
 ### Parametric cover and basis risk
 
 An illustrative district trigger (index = wind reached at a quarter of the district's sites; pays 25, 50 or 100 % at 64, 83 or 96 kt) turns the same hazard into anticipatory finance. On the best track ShadowCast reports when each district triggered and checks it against the satellites: in Fani, districts that triggered lost power at 18 % of their lit substations and districts that did not, at 0 %. Under an as-issued ensemble forecast it gives each district's probability of a payout days before landfall, the basis of forecast-based financing.
+
+### Arterial roads and access
+
+Every OpenStreetMap motorway, trunk and primary road in a region is sampled every kilometre and run through the same wind, surge and rain as the sites. Following IMD's damage classes, a road is **cut** where the surge floods it or winds reach 90 kt (an extremely severe cyclonic storm: "disruption of rail/road link at several places"), and **at risk** from 64 kt or under extreme rain on low ground. Travel on it becomes unsafe when it first enters the 64-kt radius. Each shelter and hospital is linked to its nearest arterial road, so it shows the deadline for moving people or supplies along it. On the map, cut roads turn amber as the replay passes their closing time. There is no turn-by-turn routing: a cut arterial road means the site must be reached, or left, before it closes.
 
 ### Storm surge vs IMD
 
@@ -365,7 +369,7 @@ Deploy with [`infra/archiver.sh`](infra/archiver.sh).
 
 ## Roadmap
 
-In progress: arterial roads and shelter access · evacuation routing.
+Next: turn-by-turn evacuation routing around cut roads · shelter capacity · per-utility outage models from real outage logs.
 
 ## Team and licence
 

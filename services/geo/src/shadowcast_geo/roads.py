@@ -1,11 +1,12 @@
 """Arterial roads through the storm: where they are likely cut, when they close, and which sites lose their access.
 
 Every motorway, trunk and primary road from OpenStreetMap is sampled every ``ROAD_SAMPLE_KM``. Each sample carries the
-same hazard as the assets: peak wind (and when the 64-kt radius arrives), storm-surge water and storm rain. A road is
-**cut** where surge floods it or hurricane-force winds bring down trees and poles across it (the damage IMD's bulletins
-describe for such winds), and **at risk** under storm-force winds or extreme rain on low ground. It closes when the
-first of its samples enters the 64-kt radius, which is the deadline for moving people along it. Each shelter and
-hospital is linked to its nearest arterial road, so evacuation and resupply know when their route goes.
+same hazard as the assets: peak wind (and when the 64-kt radius arrives), storm-surge water and storm rain. Following
+IMD's damage classes, a road is **cut** where surge floods it or winds reach ``ROAD_CUT_KT`` (extremely severe:
+"disruption of rail/road link at several places"), and **at risk** from ``ROAD_RISK_KT`` or under extreme rain on low
+ground. Travel on it becomes unsafe when the first of its samples enters the 64-kt radius: the deadline for moving
+people along it. Each shelter and hospital is linked to its nearest arterial road, so evacuation and resupply know when
+their route goes.
 
 No routing is attempted: a cut arterial road means the site must be reached, or left, before it closes.
 """
