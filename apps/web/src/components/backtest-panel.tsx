@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { EvidenceCard } from "@/components/evidence-card";
 import { Tile } from "@/components/tile";
 import { useBacktest } from "@/lib/api";
 import { istStamp, percent } from "@/lib/format";
@@ -28,7 +29,7 @@ const AXIS_TICK = { fontSize: 11, fill: "var(--text-muted)", fontFamily: "var(--
 /** "Prove": how well modelled wind predicted observed night-light loss after landfall. */
 export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
   const { data } = useBacktest(scenario.id);
-  const { skill, surge } = scenario;
+  const { skill, surge, rain } = scenario;
   const observed = surge.observed;
   const holdout = skill.spatial_holdout;
   const blockAucs = (holdout?.blocks ?? []).flatMap((b) => (b.auc == null ? [] : [b.auc]));
@@ -143,6 +144,26 @@ export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
             </ScatterChart>
           </ResponsiveContainer>
         </div>
+      </section>
+
+      <EvidenceCard scenarioId={scenario.id} />
+
+      <section aria-labelledby="prove-rain">
+        <h3 id="prove-rain" className="label mb-2">
+          Storm rain vs NASA GPM
+        </h3>
+        <div className="grid grid-cols-2 gap-2">
+          <Tile
+            label="Rank correlation"
+            value={rain.spearman == null ? "–" : rain.spearman.toFixed(2)}
+            hint={`modelled vs measured, ${rain.n} sites`}
+          />
+          <Tile label="Model ÷ satellite" value={`${rain.median_ratio.toFixed(2)}×`} hint="median storm total" />
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+          {rain.model}, scored against {rain.truth}. Wettest site: {Math.round(rain.max_modelled_mm)} mm modelled,{" "}
+          {Math.round(rain.max_observed_mm)} mm measured.
+        </p>
       </section>
 
       <section aria-labelledby="prove-surge">

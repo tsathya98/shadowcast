@@ -17,7 +17,7 @@ import { useAssets, useForecastTracks, useHazard, useScenario, useSurge, useTrac
 import { LANGUAGES, REGION_LANGUAGE } from "@/lib/advisory";
 import { liveAlerts } from "@/lib/alerts";
 import { dutyBrief } from "@/lib/brief";
-import { type ColorBy, compactNumber, FLOOD_FULL_M, kindLabel, rampColor, rgbCss } from "@/lib/format";
+import { type ColorBy, compactNumber, FLOOD_FULL_M, kindLabel, RAIN_FULL_MM, rampColor, rgbCss } from "@/lib/format";
 import type { ReplayMode, ScenarioSummary } from "@/lib/types";
 
 // deck.gl and the Maps JS API need the browser: never render the map on the server.
@@ -32,13 +32,21 @@ const LEGENDS: Record<ColorBy, string> = {
   gales: "Members bringing gales (34 kt)",
   wind: "Modelled wind now",
   flood: "Storm-surge water at the site",
+  rain: "Storm-total rain (R-CLIPER)",
 };
-const COLOR_LABELS: Record<ColorBy, string> = { risk: "Outage", gales: "Gales", wind: "Wind now", flood: "Surge" };
+const COLOR_LABELS: Record<ColorBy, string> = {
+  risk: "Outage",
+  gales: "Gales",
+  wind: "Wind",
+  flood: "Surge",
+  rain: "Rain",
+};
 const LEGEND_ENDS: Record<ColorBy, [string, string]> = {
   risk: ["0%", "100%"],
   gales: ["0%", "100%"],
   wind: ["0 kt", "120 kt"],
   flood: ["0 m", `${FLOOD_FULL_M} m`],
+  rain: ["0 mm", `${RAIN_FULL_MM} mm`],
 };
 const TABS = ["brief", "prioritise", "prepare", "prove"] as const;
 
@@ -154,7 +162,8 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
     );
   }
 
-  const colorOptions: ColorBy[] = mode.kind === "forecast" ? ["gales", "risk"] : ["risk", "wind", "flood"];
+  const colorOptions: ColorBy[] =
+    mode.kind === "forecast" ? ["gales", "risk", "rain"] : ["risk", "wind", "flood", "rain"];
   const forecastKey = mode.kind === "forecast" ? mode.key : null;
   const forecast = scenario?.forecasts.find((f) => f.key === forecastKey);
   const local = scenario && REGION_LANGUAGE[scenario.region.id];
@@ -253,7 +262,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
       </div>
 
       {/* Legend and encoding switch. */}
-      <div className="glass relative mx-4 mb-3 rounded-2xl p-3 lg:absolute lg:bottom-[116px] lg:left-4 lg:m-0 lg:w-72">
+      <div className="glass relative mx-4 mb-3 rounded-2xl p-3 lg:absolute lg:bottom-[116px] lg:left-4 lg:m-0 lg:w-80">
         <div className="mb-2.5 flex gap-1" role="radiogroup" aria-label="Colour assets by">
           {colorOptions.map((option) => (
             <button
@@ -335,7 +344,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
           {tab === "brief" && brief && scenario ? (
             <BriefPanel
               scenario={scenario}
-              forecastIssued={forecast?.issued ?? null}
+              forecast={forecast}
               brief={brief}
               onOpenAsset={openAsset}
               onShowPriorities={() => setTab("prioritise")}

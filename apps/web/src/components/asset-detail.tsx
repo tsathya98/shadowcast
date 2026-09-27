@@ -136,6 +136,19 @@ export function AssetDetail({ scenarioId, asset, onBack }: AssetDetailProps) {
         )}
         <Stat label="Gales arrive" value={istStamp(asset.gale_arrival)} />
         <Stat label="People · 2 km" value={compactNumber(asset.population)} />
+        {asset.rain_mm != null && (
+          <Stat
+            label="Storm rain"
+            value={`${Math.round(asset.rain_mm)} mm`}
+            hint={
+              asset.observed_rain_mm != null
+                ? `NASA GPM measured ${Math.round(asset.observed_rain_mm)} mm`
+                : forecast
+                  ? `${percent(forecast.p_rain)} of members ≥ 204.5 mm`
+                  : "R-CLIPER model"
+            }
+          />
+        )}
         {asset.flood_m != null && (
           <Stat
             label="Surge water"

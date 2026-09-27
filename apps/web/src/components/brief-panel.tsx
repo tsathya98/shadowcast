@@ -3,16 +3,18 @@
 import { clsx } from "clsx";
 
 import { BulletinCard } from "@/components/bulletin-card";
+import { LiveCard } from "@/components/live-card";
+import { ParametricCard } from "@/components/parametric-card";
 import { Tile } from "@/components/tile";
 import { useAdvisories } from "@/lib/api";
 import type { Brief } from "@/lib/brief";
 import { compactNumber, istStamp } from "@/lib/format";
-import type { ScenarioDetail } from "@/lib/types";
+import type { ForecastSummary, ScenarioDetail } from "@/lib/types";
 
 interface BriefPanelProps {
   scenario: ScenarioDetail;
-  /** Issue time of the forecast being replayed, or null on the best track. */
-  forecastIssued: string | null;
+  /** The forecast being replayed, or undefined on the best track. */
+  forecast: ForecastSummary | undefined;
   brief: Brief;
   onOpenAsset: (assetId: string) => void;
   onShowPriorities: () => void;
@@ -27,7 +29,7 @@ interface BriefPanelProps {
  */
 export function BriefPanel({
   scenario,
-  forecastIssued,
+  forecast,
   brief,
   onOpenAsset,
   onShowPriorities,
@@ -41,7 +43,9 @@ export function BriefPanel({
     <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-4">
       <p className="text-[15px] leading-relaxed text-[var(--text-primary)]">{brief.summary}</p>
 
-      <BulletinCard scenario={scenario} forecastIssued={forecastIssued} />
+      <BulletinCard scenario={scenario} forecastIssued={forecast?.issued ?? null} />
+
+      <LiveCard regionId={scenario.region.id} />
 
       <section aria-label="Exceptions" className="grid grid-cols-2 gap-2">
         <Tile
@@ -110,6 +114,8 @@ export function BriefPanel({
           </ol>
         )}
       </section>
+
+      <ParametricCard scenario={scenario} forecast={forecast} />
 
       <section aria-labelledby="brief-advisories">
         <div className="mb-2 flex items-center gap-2">

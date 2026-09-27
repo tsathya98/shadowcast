@@ -45,6 +45,10 @@ function toolAsset(asset: Asset | ForecastAsset, hindsight: boolean) {
     ...("p34" in asset && { p_gale_34kt: asset.p34, p_hurricane_64kt: asset.p64, members: asset.members }),
     ...(hindsight && { observed_night_light_loss_pct: asset.observed_loss_pct }),
     ...(asset.flood_m != null && { surge_m: asset.surge_m, surge_water_m: asset.flood_m, coast_km: asset.coast_km }),
+    district: asset.district,
+    storm_rain_mm: asset.rain_mm,
+    ...("p_rain" in asset && { p_rain_204mm: asset.p_rain }),
+    ...(hindsight && { satellite_rain_mm: asset.observed_rain_mm }),
     reasons: asset.reasons,
   };
 }
@@ -73,7 +77,25 @@ function instructions(scenario: ScenarioDetail, context: AgentContext): string {
 - Storm surge (screening model on the best track: ${scenario.surge.method}): crest ${scenario.surge.peak_m.toFixed(1)} m around ${utcAndIst(scenario.surge.time)}; ${scenario.surge.flooded_sites} assets get at least 0.3 m of water (surge_water_m in the tool results). Never send people to a shelter in the surge zone.` +
       (scenario.surge.observed
         ? ` IMD reported ${scenario.surge.observed.low_m}-${scenario.surge.observed.high_m} m at ${scenario.surge.observed.place} (${scenario.surge.observed.kind}); the model gives ${scenario.surge.observed.modelled_m ?? "n/a"} m there.`
-        : "");
+        : "") +
+      `
+- Rain (${scenario.rain.model}): up to ${scenario.rain.max_modelled_mm} mm; against ${scenario.rain.truth} the rank correlation is ${scenario.rain.spearman?.toFixed(2) ?? "n/a"} and the model runs ${scenario.rain.median_ratio.toFixed(2)}x the satellite total.
+- Parametric cover (${scenario.insurance.terms}): ${
+        scenario.insurance.districts
+          .filter((d) => d.payout_share > 0)
+          .map(
+            (d) =>
+              `${d.district} pays ${Math.round(d.payout_share * 100)}%${d.lead_h != null ? `, triggered ${Math.round(d.lead_h)} h before landfall` : ""}`,
+          )
+          .join("; ") || "no district triggers"
+      }.`;
+  const cover = forecast?.districts.length
+    ? `
+- Parametric cover under this forecast (share of members triggering a payout): ${forecast.districts
+        .slice(0, 6)
+        .map((d) => `${d.district} ${Math.round(d.p_trigger * 100)}%`)
+        .join(", ")}.`
+    : "";
   const local = REGION_LANGUAGE[scenario.region.id];
   const languages = local ? `English, Hindi and ${LANGUAGES[local].name}` : "English and Hindi";
   return `You are ShadowCast's duty analyst, working beside a district emergency operations officer on the ${scenario.region.name}, India.
@@ -85,7 +107,7 @@ ${context.selectedAssetId ? `The officer has selected asset_id "${context.select
 How ShadowCast works (explain only when asked, in one or two sentences):
 - Wind at each asset comes from a Holland parametric wind field along the storm track, every 15 minutes.
 - P(outage) is a logistic model of peak wind against a loss of at least half the night lights seen by NASA's VIIRS satellite, fitted on ${model.trained_on} (${model.n} substations, AUC ${model.auc?.toFixed(2) ?? "n/a"}).
-- Priority = P(outage) × criticality (hospital and cyclone shelter 5, substation and health centre 4, school 2); ties go to gale exposure, then population.${backtest}
+- Priority = P(outage) × criticality (hospital and cyclone shelter 5, substation and health centre 4, school 2); ties go to gale exposure, then population.${backtest}${cover}
 
 Rules:
 - Every number, name and time you state must come from a tool result or this message. Never estimate or invent. If the tools do not have it, say so.

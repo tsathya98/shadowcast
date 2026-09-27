@@ -51,6 +51,7 @@ const HOUR_MS = 3_600_000;
 const LIKELY = 0.5;
 const LANDFALL_WINDOW_H = 1;
 const FLOOD_M = 0.3; // ankle-deep: enough to stop vehicles and wet equipment
+const EXTREME_RAIN_MM = 204.5; // IMD's "extremely heavy" threshold
 const PEOPLE_SITES = ["cyclone_shelter", "school", "hospital", "health_centre", "clinic"];
 /**
  * Who acts for which kinds of site, and what they do before gales arrive. The first group is chosen by modelled surge
@@ -139,13 +140,18 @@ export function dutyBrief({ assets, timeMs, storm, region, landfall }: BriefInpu
     likely.length === 0
       ? `No site is likely to ${hazard}: all clear.`
       : `${count} ${likely.length === 1 ? "site is" : "sites are"} likely to ${hazard}; gales have reached ${reached} of them.`;
+  const drenched = assets.filter((a) => (a.rain_mm ?? 0) >= EXTREME_RAIN_MM).length;
+  const rain =
+    drenched > 0
+      ? ` Extremely heavy rain (204.5 mm or more) is modelled at ${drenched.toLocaleString("en-IN")} ${drenched === 1 ? "site" : "sites"}.`
+      : "";
   const surge =
     flooded.length > 0
       ? ` The storm surge could flood ${flooded.length.toLocaleString("en-IN")} ${flooded.length === 1 ? "site" : "sites"}.`
       : "";
 
   return {
-    summary: `${when} ${impact}${surge}`,
+    summary: `${when} ${impact}${surge}${rain}`,
     hazard,
     likely: likely.length,
     reached,

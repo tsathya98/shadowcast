@@ -91,6 +91,8 @@ describe("assetValue", () => {
     ["wind", asset, null, 0],
     ["flood", { ...asset, flood_m: 1 }, null, 0.5],
     ["flood", asset, null, 0],
+    ["rain", { ...asset, rain_mm: 150 }, null, 0.5],
+    ["rain", asset, null, 0],
   ] as const)("colorBy=%s", (colorBy, item, wind, expected) => {
     expect(assetValue(item, colorBy, wind)).toBe(expected);
   });

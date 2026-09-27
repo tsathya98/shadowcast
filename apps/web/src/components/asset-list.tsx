@@ -56,7 +56,9 @@ export function AssetList({ assets, colorBy, selectedId, onSelect }: AssetListPr
           const shown =
             colorBy === "flood"
               ? `${(asset.flood_m ?? 0).toFixed(1)} m`
-              : percent(colorBy === "gales" && forecast ? (asset as ForecastAsset).p34 : asset.p_outage);
+              : colorBy === "rain"
+                ? `${Math.round(asset.rain_mm ?? 0)} mm`
+                : percent(colorBy === "gales" && forecast ? (asset as ForecastAsset).p34 : asset.p_outage);
           return (
             <li key={asset.asset_id}>
               <button

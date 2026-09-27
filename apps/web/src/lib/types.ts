@@ -63,6 +63,41 @@ export interface ForecastSummary {
   assets_likely_hurricane: number;
   max_p_outage: number;
   source: string;
+  /** Parametric cover per district under this forecast. */
+  districts: ForecastDistrict[];
+}
+
+export interface ForecastDistrict {
+  district: string;
+  p_trigger: number;
+  expected_payout_share: number;
+  index_kt: number;
+}
+
+/** Parametric cover per district on the best track, with the outages satellites saw there (basis risk). */
+export interface DistrictTrigger {
+  district: string;
+  lat: number;
+  lon: number;
+  sites: number;
+  index_kt: number;
+  payout_share: number;
+  trigger_time: string | null;
+  lead_h: number | null;
+  lit_substations: number;
+  observed_outage_rate: number | null;
+}
+
+/** Modelled storm rain against satellite-measured rain (best track). */
+export interface RainSummary {
+  model: string;
+  truth: string;
+  n: number;
+  spearman: number | null;
+  median_ratio: number;
+  max_modelled_mm: number;
+  max_observed_mm: number;
+  extreme_sites: number;
 }
 
 /** IMD's reported surge next to the modelled peak on the same stretch of coast. */
@@ -103,6 +138,8 @@ export interface ScenarioDetail extends ScenarioSummary {
   skill: Skill;
   loss_by_band: LossBand[];
   surge: SurgeSummary;
+  rain: RainSummary;
+  insurance: { terms: string; districts: DistrictTrigger[] };
   forecasts: ForecastSummary[];
   built_at: string;
 }
@@ -124,6 +161,10 @@ export interface Asset {
   gale_arrival: string | null;
   population: number | null;
   elevation_m: number | null;
+  district?: string | null;
+  /** Modelled storm-total rain (R-CLIPER); satellite-measured rain on the best track only. */
+  rain_mm?: number | null;
+  observed_rain_mm?: number | null;
   /** Storm surge on the best track only: distance to the open coast, the peak surge there, water depth here. */
   coast_km?: number | null;
   surge_m?: number | null;
@@ -141,6 +182,7 @@ export interface ForecastAsset extends Asset {
   wind_p10: number;
   wind_p90: number;
   members: number;
+  p_rain: number;
 }
 
 export interface Page<T> {
@@ -198,6 +240,34 @@ export interface Backtest {
   skill: Skill;
   loss_by_band: LossBand[];
   substations: BacktestSubstation[];
+}
+
+/** The feed archiver's newest run: cyclones GDACS is tracking and official NDMA SACHET warnings, as issued. */
+export interface LiveFeed {
+  run_at: string | null;
+  cyclones: {
+    name: string | null;
+    alert: string | null;
+    severity: string | null;
+    country: string | null;
+    start: string | null;
+    end: string | null;
+    current: boolean;
+    url: string;
+  }[];
+  warnings: {
+    identifier: string;
+    sender: string;
+    sent: string;
+    event: string;
+    severity: string;
+    urgency: string;
+    certainty: string;
+    headline: string;
+    onset: string;
+    expires: string;
+    areas: string[];
+  }[];
 }
 
 /** Either the best-track replay or one as-issued ensemble forecast. */

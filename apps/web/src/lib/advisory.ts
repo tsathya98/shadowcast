@@ -22,6 +22,13 @@ export const REGION_LANGUAGE: Record<string, Language> = {
   "west-bengal-coast": "bn",
 };
 
+/** The state each study region lies in, as NDMA SACHET names it in warning areas. */
+export const REGION_STATE: Record<string, string> = {
+  "odisha-coast": "Odisha",
+  "north-andhra-coast": "Andhra Pradesh",
+  "west-bengal-coast": "West Bengal",
+};
+
 const languageCodes = Object.keys(LANGUAGES) as [Language, ...Language[]];
 
 export const advisorySchema = z.object({

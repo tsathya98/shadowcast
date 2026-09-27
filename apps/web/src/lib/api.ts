@@ -8,12 +8,14 @@ import useSWR, { type SWRConfiguration } from "swr";
 
 import type { AdvisorySummary } from "./advisory";
 import type { Bulletin } from "./bulletin";
+import type { Evidence } from "./evidence";
 import type {
   Asset,
   AssetDetail,
   Backtest,
   ForecastAsset,
   HazardSnapshot,
+  LiveFeed,
   Page,
   ReplayMode,
   ScenarioDetail,
@@ -90,4 +92,14 @@ export function useAdvisories(scenarioId: string) {
 /** Gemini's reading of the scenario's official IMD bulletin; the first request may take a while (Gemini reads the PDF). */
 export function useBulletin(scenarioId: string) {
   return useSWR<Bulletin>(`/api/bulletins/${scenarioId}`, fetchJson, { ...STATIC, shouldRetryOnError: false });
+}
+
+/** Gemini's reading of the before/after satellite night lights (the first request waits for Gemini). */
+export function useEvidence(scenarioId: string) {
+  return useSWR<Evidence>(`/api/evidence/${scenarioId}`, fetchJson, { ...STATIC, shouldRetryOnError: false });
+}
+
+/** The live picture from the feed archiver's newest run; refreshed every 15 minutes while the console is open. */
+export function useLive() {
+  return useSWR<LiveFeed>(`${GEO_PREFIX}/live`, fetchJson, { refreshInterval: 15 * 60_000, shouldRetryOnError: false });
 }

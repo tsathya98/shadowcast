@@ -99,6 +99,14 @@ describe("dutyBrief", () => {
     ]);
     const one = dutyBrief({ ...fani, assets: surged.slice(0, 1), timeMs: at("2019-05-02T13:00:00Z") });
     expect(one.summary.endsWith("The storm surge could flood 1 site.")).toBe(true);
+    const wet = (n: number) =>
+      dutyBrief({
+        ...fani,
+        assets: surged.slice(0, n).map((a) => ({ ...a, rain_mm: 250 })),
+        timeMs: at("2019-05-02T13:00:00Z"),
+      });
+    expect(wet(1).summary.endsWith("Extremely heavy rain (204.5 mm or more) is modelled at 1 site.")).toBe(true);
+    expect(wet(2).summary.endsWith("is modelled at 2 sites.")).toBe(true);
   });
 
   it("is all clear when no site is likely to be hit", () => {

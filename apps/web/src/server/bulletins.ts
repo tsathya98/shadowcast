@@ -5,7 +5,7 @@
 import { generateText, Output } from "ai";
 
 import { type Bulletin, bulletinSchema } from "@/lib/bulletin";
-import { GEMINI_MODEL, getBulletin, saveBulletin, vertex } from "@/server/google";
+import { cachedReading, GEMINI_MODEL, vertex } from "@/server/google";
 
 const RSMC = "https://rsmcnewdelhi.imd.gov.in/uploads";
 
@@ -41,13 +41,9 @@ const PROMPT: Record<Bulletin["kind"], string> = {
     "nothing added. Use the landfall time as the issue time. Use null for anything the report does not state.",
 };
 
-const inflight = new Map<string, Promise<Bulletin | null>>();
-
 async function read(scenarioId: string): Promise<Bulletin | null> {
   const source = SOURCES[scenarioId];
   if (!source) return null;
-  const cached = await getBulletin(scenarioId);
-  if (cached) return cached;
 
   const pdf = await fetch(source.url, { signal: AbortSignal.timeout(30_000) });
   if (!pdf.ok) throw new Error(`IMD document unavailable (${pdf.status})`);
@@ -66,25 +62,20 @@ async function read(scenarioId: string): Promise<Bulletin | null> {
     maxRetries: 3,
     abortSignal: AbortSignal.timeout(100_000),
   });
-  const bulletin: Bulletin = {
+  return {
     reading: output,
     kind: source.kind,
     source: source.url,
     readAt: new Date().toISOString(),
     model: GEMINI_MODEL,
   };
-  await saveBulletin(scenarioId, bulletin);
-  return bulletin;
 }
 
 /**
- * Gemini's reading of a scenario's IMD bulletin: from the cache, or read now (concurrent first requests share one
- * read).
+ * Gemini's reading of a scenario's IMD bulletin, from the cache or read now.
  *
  * @returns The reading, or null when the scenario has no archived IMD document.
  */
 export function officialBulletin(scenarioId: string): Promise<Bulletin | null> {
-  const pending = inflight.get(scenarioId) ?? read(scenarioId).finally(() => inflight.delete(scenarioId));
-  inflight.set(scenarioId, pending);
-  return pending;
+  return cachedReading("bulletins", scenarioId, () => read(scenarioId));
 }
