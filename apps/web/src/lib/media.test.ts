@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { blobToDataUrl, encodeWav, recordingToWavUrl } from "./media";
+import { blobToDataUrl, encodeWav, fromPcm16, recordingToWavUrl, toPcm16, voiceCallUrl } from "./media";
 
 describe("encodeWav", () => {
   it("writes a 16-bit mono PCM header and clipped little-endian samples", () => {
@@ -61,5 +61,25 @@ describe("recordingToWavUrl", () => {
 
     await expect(blobToDataUrl(new Blob(["x"]))).rejects.toThrow("unreadable");
     vi.unstubAllGlobals();
+  });
+});
+
+describe("toPcm16 and fromPcm16", () => {
+  it("clips to 16-bit PCM and reads Gemini's PCM back into [-1, 1]", () => {
+    const pcm = toPcm16(new Float32Array([0, 1, -1, 2, -0.5]));
+    expect([...pcm]).toEqual([0, 32767, -32768, 32767, -16384]);
+    expect([...fromPcm16(new Int16Array([0, -32768, 16384]).buffer)]).toEqual([0, -1, 0.5]);
+  });
+});
+
+describe("voiceCallUrl", () => {
+  it.each([
+    [{ scenarioId: "fani-2019", forecastKey: null, language: null }, "wss://geo.example/scenarios/fani-2019/voice"],
+    [
+      { scenarioId: "dana-2024", forecastKey: "20241022T00Z", selectedAssetId: "osm:node/1", language: "or" as const },
+      "wss://geo.example/scenarios/dana-2024/voice?forecast=20241022T00Z&asset=osm%3Anode%2F1&language=or",
+    ],
+  ])("opens the call on the geo service for the replay being viewed", (context, expected) => {
+    expect(voiceCallUrl("https://geo.example", context)).toBe(expected);
   });
 });

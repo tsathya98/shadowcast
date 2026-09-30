@@ -1,13 +1,17 @@
 /**
  * Voice notes and attachments for the duty analyst. Browsers record WebM/Opus, which Gemini does not accept, so a
  * recording is decoded and re-encoded as 16 kHz mono 16-bit PCM WAV: small (32 kB/s) and understood by every speech
- * model. Photos, PDFs and audio files travel as data URLs in chat file parts.
+ * model. Photos, PDFs and audio files travel as data URLs in chat file parts. A live voice call streams the same
+ * 16 kHz PCM to the geo service and plays back Gemini's 24 kHz PCM.
  */
+
+import type { Language } from "./advisory";
 
 export const ATTACHMENT_TYPES = ["image/", "application/pdf", "audio/"];
 export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const VOICE_SAMPLE_RATE = 16_000;
 export const MAX_VOICE_SECONDS = 60;
+export const CALL_OUTPUT_RATE = 24_000;
 
 /**
  * Encode mono samples in [-1, 1] as a PCM WAV file.
@@ -34,11 +38,54 @@ export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffe
   view.setUint16(34, 16, true); // bits per sample
   text(36, "data");
   view.setUint32(40, samples.length * 2, true);
-  samples.forEach((sample, i) => {
-    const s = Math.max(-1, Math.min(1, sample));
-    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-  });
+  new Int16Array(buffer, 44).set(toPcm16(samples));
   return buffer;
+}
+
+/**
+ * Convert samples in [-1, 1] to 16-bit PCM, clipping anything outside the range.
+ *
+ * @param samples Audio samples.
+ * @returns The 16-bit samples (little-endian in memory on every browser platform).
+ */
+export function toPcm16(samples: Float32Array): Int16Array {
+  return Int16Array.from(samples, (sample) => {
+    const s = Math.max(-1, Math.min(1, sample));
+    return s < 0 ? s * 0x8000 : s * 0x7fff;
+  });
+}
+
+/**
+ * Convert 16-bit little-endian PCM bytes, as Gemini Live speaks them, to samples in [-1, 1].
+ *
+ * @param bytes The PCM bytes.
+ * @returns The samples.
+ */
+export function fromPcm16(bytes: ArrayBuffer): Float32Array<ArrayBuffer> {
+  return Float32Array.from(new Int16Array(bytes), (sample) => sample / 0x8000);
+}
+
+export interface CallContext {
+  scenarioId: string;
+  forecastKey: string | null;
+  selectedAssetId?: string | null;
+  language: Language | null;
+}
+
+/**
+ * The WebSocket address of a voice call on the geo service, scoped to the replay the officer is viewing.
+ *
+ * @param geoUrl The geo service's https (or http) address.
+ * @param context The replay, the selected asset and the reply language.
+ * @returns The ``wss://`` (or ``ws://``) URL.
+ */
+export function voiceCallUrl(geoUrl: string, context: CallContext): string {
+  const params = new URLSearchParams();
+  if (context.forecastKey) params.set("forecast", context.forecastKey);
+  if (context.selectedAssetId) params.set("asset", context.selectedAssetId);
+  if (context.language) params.set("language", context.language);
+  const query = params.size ? `?${params}` : "";
+  return `${geoUrl.replace(/^http/, "ws")}/scenarios/${encodeURIComponent(context.scenarioId)}/voice${query}`;
 }
 
 /**

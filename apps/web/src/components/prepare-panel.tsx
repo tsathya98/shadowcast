@@ -3,10 +3,23 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type FileUIPart, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import { clsx } from "clsx";
-import { ArrowUp, FileText, Landmark, LoaderCircle, Mic, Paperclip, Search, Square, Volume2, X } from "lucide-react";
+import {
+  ArrowUp,
+  FileText,
+  Landmark,
+  LoaderCircle,
+  Mic,
+  Paperclip,
+  Phone,
+  Search,
+  Square,
+  Volume2,
+  X,
+} from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { AdvisoryCard } from "@/components/advisory-card";
+import { VoiceCall } from "@/components/voice-call";
 import { type Language, LANGUAGE_CODES, LANGUAGES } from "@/lib/advisory";
 import {
   ATTACHMENT_TYPES,
@@ -48,6 +61,7 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
   const [notice, setNotice] = useState<string | null>(null);
   const [language, setLanguage] = useState<Language | null>(null);
   const [speaking, setSpeaking] = useState<string | null>(null);
+  const [calling, setCalling] = useState(false);
   const player = useRef<HTMLAudioElement | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const busy = status === "submitted" || status === "streaming";
@@ -141,7 +155,8 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-3" aria-live="polite">
-        {messages.length === 0 && (
+        {calling && <VoiceCall context={{ ...context, language }} onClose={() => setCalling(false)} />}
+        {messages.length === 0 && !calling && (
           <div className="space-y-3 pt-1">
             <div className="label">Duty analyst · Gemini 3.8 Flash</div>
             <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
@@ -328,7 +343,7 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
             <button
               type="button"
               onClick={() => void toggleVoice()}
-              disabled={busy}
+              disabled={busy || calling}
               aria-label={recorder ? "Stop and send the voice question" : "Ask by voice"}
               aria-pressed={recorder != null}
               className={clsx(
@@ -337,6 +352,19 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
               )}
             >
               <Mic className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                player.current?.pause();
+                setCalling(true);
+              }}
+              disabled={calling || recorder != null}
+              aria-label="Start a live voice call"
+              title="Live voice call: talk with the analyst, and interrupt it, in real time"
+              className="btn-ghost grid size-9 place-items-center disabled:opacity-40"
+            >
+              <Phone className="size-4" />
             </button>
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-1">
