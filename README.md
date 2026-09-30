@@ -198,16 +198,18 @@ flowchart LR
     user(["Duty officer<br/>browser"])
 
     subgraph vercel["Vercel"]
-        web["Next.js 16 console<br/>Google Maps + deck.gl"]
-        routes["Agent routes<br/>/api/agent · /api/advisories<br/>/api/bulletins · /api/evidence"]
+        web["Next.js 16 console<br/>deck.gl overlays"]
+        routes["Agent routes<br/>/api/agent · /api/advisories<br/>/api/advisories/[id]/audio (TTS)<br/>/api/bulletins · /api/evidence"]
     end
 
     subgraph gcp["Google Cloud"]
+        maps["Google Maps Platform<br/>Maps JavaScript API"]
         vertex["Vertex AI<br/>Gemini 3.8 Flash<br/>Gemini 2.5 Flash TTS"]
         fs[("Firestore<br/>audit log · Gemini readings")]
         geo["Cloud Run<br/>geo API (FastAPI)"]
-        gcs[("Cloud Storage<br/>built scenarios")]
-        job["Cloud Run Job<br/>archiver, every 6 h"]
+        gcs[("Cloud Storage<br/>built scenarios<br/>before/after VIIRS images")]
+        sched["Cloud Scheduler<br/>every 6 h"]
+        job["Cloud Run Job<br/>archiver"]
         archive[("Cloud Storage<br/>feed archive")]
     end
 
@@ -220,29 +222,31 @@ flowchart LR
     imd["IMD bulletins (PDF)"]
 
     user --> web
+    web -->|"base map"| maps
     web -->|"/api/geo/* rewrite"| geo
     web --> routes
     routes -->|"Workload Identity Federation<br/>no keys"| vertex
     routes --> fs
-    routes -->|searchAssets| geo
+    routes -->|"searchAssets · evidence images"| geo
     geo --> gcs
     src --> gcs
-    ee --> gcs
+    ee -->|"scenarios · rendered<br/>night-light images"| gcs
+    sched -->|triggers| job
     feeds --> job --> archive
     archive -->|"/live"| geo
     imd -->|"read by Gemini"| routes
 
     classDef accent fill:#16191c,stroke:#F28A2E,color:#ffffff
     classDef store fill:#16191c,stroke:#8F8E86,color:#ffffff
-    class web,routes,geo,job,vertex accent
+    class web,routes,geo,job,vertex,maps,sched accent
     class fs,gcs,archive store
 ```
 
 - **Console** ([`apps/web`](apps/web)): Next.js 16 (App Router), React 19, Tailwind 4 on Vercel. Data is fetched client-side with SWR through the same-origin `/api/geo/*` rewrite, so the API location is server configuration only.
 - **Keyless access:** Vercel's OIDC token is exchanged through Workload Identity Federation for short-lived credentials of a service account that may only call Vertex AI and use Firestore. There is no service-account key anywhere.
-- **geo API** ([`services/geo`](services/geo)): FastAPI on Cloud Run. It serves the built scenarios and computes wind at every site at any moment for the timeline scrubber.
+- **geo API** ([`services/geo`](services/geo)): FastAPI on Cloud Run. It serves the built scenarios and computes wind at every site at any moment for the timeline scrubber. It also serves the before/after VIIRS images that Earth Engine rendered at build time, which `/api/evidence` hands to Gemini to read.
 - **Storage is all Google Cloud:** built scenarios and the feed archive in Cloud Storage, the audit log and bulletin readings in Firestore (free tier). Nothing is kept on local disk or in the browser.
-- **Archiver** ([`services/archiver`](services/archiver)): a Cloud Run Job that snapshots the feeds with no public history (GDACS, NDMA SACHET CAP alerts, IBTrACS provisional, WeatherNext 2 via Open-Meteo) every 6 h, so any storm, including one forming during judging, can be replayed later as issued.
+- **Archiver** ([`services/archiver`](services/archiver)): a Cloud Run Job that snapshots the feeds with no public history (GDACS, NDMA SACHET CAP alerts, IBTrACS provisional, WeatherNext 2 via Open-Meteo) every 6 h, triggered by Cloud Scheduler, so any storm, including one forming during judging, can be replayed later as issued.
 
 ## Coverage
 
