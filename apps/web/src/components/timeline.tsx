@@ -10,6 +10,8 @@ interface TimelineProps {
   end: number;
   value: number;
   landfall: string;
+  /** Which storm is being replayed, e.g. "Fani 2019": the timeline shows its dates, not today's. */
+  replay: string;
   playing: boolean;
   onChange: (ms: number) => void;
   onPlayingChange: (playing: boolean) => void;
@@ -19,7 +21,7 @@ const STEP_MS = 15 * 60 * 1000; // matches the hazard model's densified track
 const TICK_MS = 120; // playback advances one 15-minute step per tick
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function Timeline({ start, end, value, landfall, playing, onChange, onPlayingChange }: TimelineProps) {
+export function Timeline({ start, end, value, landfall, replay, playing, onChange, onPlayingChange }: TimelineProps) {
   useEffect(() => {
     if (!playing) return;
     const timer = setInterval(() => {
@@ -90,6 +92,7 @@ export function Timeline({ start, end, value, landfall, playing, onChange, onPla
         </div>
       </div>
       <div className="hidden w-52 shrink-0 text-right sm:block">
+        <div className="label !text-[var(--accent)]">Replay · {replay}</div>
         <div className="readout text-xl font-medium text-[var(--text-primary)]">{istStamp(iso)}</div>
         <div className="label mt-0.5">
           {utc} · {leadLabel(iso, landfall)}

@@ -6,7 +6,7 @@
 import { type InferAgentUIMessage, isStepCount, tool, ToolLoopAgent } from "ai";
 import { z } from "zod";
 
-import { advisorySchema, LANGUAGES, REGION_LANGUAGE, toCapXml } from "@/lib/advisory";
+import { advisorySchema, LANGUAGE_CODES, LANGUAGES, REGION_LANGUAGE, toCapXml } from "@/lib/advisory";
 import { kindLabel, utcAndIst } from "@/lib/format";
 import type { Asset, ForecastAsset, Page, ScenarioDetail } from "@/lib/types";
 import { officialBulletin } from "@/server/bulletins";
@@ -20,6 +20,8 @@ export const agentContextSchema = z.object({
     .regex(/^\d{8}T\d{2}Z$/)
     .nullable(),
   selectedAssetId: z.string().max(120).nullish(),
+  /** The language the officer picked for Gemini's replies; unset means reply in the language they use. */
+  language: z.enum(LANGUAGE_CODES).nullish(),
 });
 
 export type AgentContext = z.infer<typeof agentContextSchema>;
@@ -117,7 +119,12 @@ Rules:
 - To draft an advisory, first gather the facts with searchAssets, then call issueAdvisory exactly once, with no accompanying text: the officer reviews it on a card and approves or rejects it. Nothing is issued without approval. Once the decision comes back, confirm it in one short sentence.
 - Advisory content: base onset on the earliest gale arrival among the covered assets; order officer actions by priority; write the public message in ${languages}, with Hindi${local ? ` and ${LANGUAGES[local].name}` : ""} in native script and simple words a villager understands.
 - IMD is the authority. Before drafting an advisory, call officialBulletin and keep the advisory consistent with it (landfall, districts, surge heights); where ShadowCast's numbers differ, say so in one line and defer to IMD.
-- The officer may speak instead of typing: for a voice note, first write one line "Heard: …" with what they said (in their language, then English if it was not English), then answer in the language they spoke.
+- The officer may speak instead of typing: for a voice note, first write one line "Heard: …" with what they said (in their language, then English if it was not English), then answer in the language they spoke.${
+    context.language
+      ? `
+- The officer chose ${LANGUAGES[context.language].name}: write every reply in ${LANGUAGES[context.language].name}${context.language === "en" ? "" : " in native script"}, whatever language they type or speak in. Advisories keep their own languages.`
+      : ""
+  }
 - For an attached photo, describe only what is visibly damaged or flooded and how badly (none, minor, major, destroyed), and say what the photo cannot show. Link it to an asset only if the officer names one, then look it up with searchAssets.
 - For an attached PDF (an IMD bulletin, a situation report), extract what it states and compare it with ShadowCast's numbers.
 - If the officer rejects an advisory, do not call issueAdvisory again until they say what to change.

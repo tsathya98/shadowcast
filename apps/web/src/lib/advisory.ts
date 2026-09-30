@@ -11,6 +11,7 @@ export const LANGUAGES = {
   or: { cap: "or-IN", label: "ଓଡ଼ିଆ", name: "Odia" },
   te: { cap: "te-IN", label: "తెలుగు", name: "Telugu" },
   bn: { cap: "bn-IN", label: "বাংলা", name: "Bengali" },
+  ta: { cap: "ta-IN", label: "தமிழ்", name: "Tamil" },
 } as const;
 
 export type Language = keyof typeof LANGUAGES;
@@ -29,7 +30,7 @@ export const REGION_STATE: Record<string, string> = {
   "west-bengal-coast": "West Bengal",
 };
 
-const languageCodes = Object.keys(LANGUAGES) as [Language, ...Language[]];
+export const LANGUAGE_CODES = Object.keys(LANGUAGES) as [Language, ...Language[]];
 
 export const advisorySchema = z.object({
   event: z.string().max(80).describe("CAP event, e.g. 'Extremely Severe Cyclonic Storm Fani'"),
@@ -53,14 +54,14 @@ export const advisorySchema = z.object({
   infos: z
     .array(
       z.object({
-        language: z.enum(languageCodes),
+        language: z.enum(LANGUAGE_CODES),
         headline: z.string().max(160),
         description: z.string().max(700).describe("What is expected, where and when"),
         instruction: z.string().max(700).describe("What the public should do"),
       }),
     )
     .min(1)
-    .max(languageCodes.length)
+    .max(LANGUAGE_CODES.length)
     .refine((infos) => new Set(infos.map((info) => info.language)).size === infos.length, "one info per language")
     .describe("The public message, once per language (native script for Hindi and the local language)"),
 });

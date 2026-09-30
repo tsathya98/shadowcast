@@ -3,10 +3,11 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type FileUIPart, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import { clsx } from "clsx";
-import { ArrowUp, FileText, Landmark, LoaderCircle, Mic, Paperclip, Search, Square, X } from "lucide-react";
+import { ArrowUp, FileText, Landmark, LoaderCircle, Mic, Paperclip, Search, Square, Volume2, X } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { AdvisoryCard } from "@/components/advisory-card";
+import { type Language, LANGUAGE_CODES, LANGUAGES } from "@/lib/advisory";
 import {
   ATTACHMENT_TYPES,
   blobToDataUrl,
@@ -45,6 +46,9 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
   const [files, setFiles] = useState<FileUIPart[]>([]);
   const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [language, setLanguage] = useState<Language | null>(null);
+  const [speaking, setSpeaking] = useState<string | null>(null);
+  const player = useRef<HTMLAudioElement | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const busy = status === "submitted" || status === "streaming";
 
@@ -57,7 +61,7 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
     if ((!text.trim() && attachments.length === 0) || busy) return;
     void sendMessage(
       { text: text.trim() || "(See the attachment.)", files: attachments },
-      { body: { selectedAssetId: context.selectedAssetId } },
+      { body: { selectedAssetId: context.selectedAssetId, language } },
     );
     setInput("");
     setFiles([]);
@@ -103,6 +107,30 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
       setTimeout(() => next.state === "recording" && next.stop(), MAX_VOICE_SECONDS * 1000);
     } catch {
       setNotice("Microphone unavailable: allow access in the browser to ask by voice.");
+    }
+  };
+  // Read one of Gemini's replies aloud with Gemini-TTS; tapping again, or another reply, stops it.
+  const listen = async (messageId: string, text: string) => {
+    player.current?.pause();
+    if (speaking === messageId) {
+      setSpeaking(null);
+      return;
+    }
+    setSpeaking(messageId);
+    try {
+      const response = await fetch("/api/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!response.ok) throw new Error(`speech failed (${response.status})`);
+      const audio = new Audio(URL.createObjectURL(await response.blob()));
+      player.current = audio;
+      audio.onended = () => setSpeaking((current) => (current === messageId ? null : current));
+      await audio.play();
+    } catch {
+      setSpeaking(null);
+      setNotice("Could not read the reply aloud. Try again.");
     }
   };
   const submit = (event: FormEvent) => {
@@ -240,6 +268,13 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
                   return null;
               }
             })}
+            {message.role === "assistant" && (status === "ready" || message.id !== messages.at(-1)?.id) && (
+              <SpeakButton
+                active={speaking === message.id}
+                onClick={() => void listen(message.id, replyText(message))}
+                hidden={!replyText(message)}
+              />
+            )}
           </div>
         ))}
         {status === "submitted" && (
@@ -304,18 +339,38 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
               <Mic className="size-4" />
             </button>
           </div>
-          <textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) submit(event);
-            }}
-            rows={2}
-            maxLength={2000}
-            placeholder="Ask the duty analyst…"
-            aria-label="Message the duty analyst"
-            className="min-h-0 flex-1 resize-none rounded-2xl border border-[var(--line-strong)] bg-[var(--surface-2)] px-3.5 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
-          />
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <label className="flex items-center gap-1.5 self-start text-xs text-[var(--text-muted)]">
+              Reply in
+              <select
+                value={language ?? "auto"}
+                onChange={(event) =>
+                  setLanguage(event.target.value === "auto" ? null : (event.target.value as Language))
+                }
+                aria-label="Reply language"
+                className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface-2)] px-1.5 py-0.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+              >
+                <option value="auto">the language I use</option>
+                {LANGUAGE_CODES.map((code) => (
+                  <option key={code} value={code}>
+                    {LANGUAGES[code].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) submit(event);
+              }}
+              rows={2}
+              maxLength={2000}
+              placeholder="Ask the duty analyst…"
+              aria-label="Message the duty analyst"
+              className="min-h-0 w-full resize-none rounded-2xl border border-[var(--line-strong)] bg-[var(--surface-2)] px-3.5 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
+            />
+          </div>
           {busy ? (
             <button
               type="button"
@@ -338,5 +393,35 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
         </div>
       </form>
     </div>
+  );
+}
+
+/** The text of one of Gemini's replies, as it should be read aloud (tool steps and cards are left out). */
+function replyText(message: ShadowCastMessage): string {
+  return message.parts
+    .flatMap((part) => (part.type === "text" && part.text !== VOICE_PROMPT ? [part.text] : []))
+    .join("\n")
+    .trim();
+}
+
+interface SpeakButtonProps {
+  active: boolean;
+  hidden: boolean;
+  onClick: () => void;
+}
+
+/** Listen to a reply, or stop it. */
+function SpeakButton({ active, hidden, onClick }: SpeakButtonProps) {
+  if (hidden) return null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className="flex items-center gap-1 self-start text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+    >
+      <Volume2 className={clsx("size-3.5", active && "animate-pulse text-[var(--accent)]")} />
+      {active ? "Stop" : "Listen"}
+    </button>
   );
 }

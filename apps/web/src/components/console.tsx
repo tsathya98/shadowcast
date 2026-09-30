@@ -319,6 +319,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
             end={span.end}
             value={timeMs}
             landfall={scenario.landfall}
+            replay={`${scenario.storm} ${scenario.season}`}
             playing={playing}
             onChange={setTimeMs}
             onPlayingChange={setPlaying}

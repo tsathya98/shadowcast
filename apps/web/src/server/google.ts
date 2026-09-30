@@ -5,6 +5,7 @@
  */
 import { Firestore } from "@google-cloud/firestore";
 import { createVertex } from "@ai-sdk/google-vertex";
+import { generateSpeech } from "ai";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { type ExternalAccountClientOptions, ExternalAccountClient } from "google-auth-library";
 
@@ -28,6 +29,7 @@ const federated: ExternalAccountClientOptions | undefined =
     : undefined;
 
 export const GEMINI_MODEL = "gemini-3.8-flash";
+const TTS_MODEL = "gemini-2.5-flash-tts";
 
 /** Gemini 3.x models are served only from the global Vertex AI endpoint. */
 export const vertex = createVertex({
@@ -35,6 +37,24 @@ export const vertex = createVertex({
   location: "global",
   googleAuthOptions: federated && { credentials: federated },
 });
+
+/**
+ * Speak text with Gemini-TTS (Cloud Text-to-Speech has no Odia voice). The language is read from the text itself, so
+ * one voice serves English, Hindi, Odia, Telugu, Bengali and Tamil.
+ *
+ * @param text What to say.
+ * @returns The audio bytes and their media type.
+ */
+export async function speak(text: string): Promise<{ bytes: Buffer<ArrayBuffer>; mediaType: string }> {
+  const { audio } = await generateSpeech({
+    model: vertex.speech(TTS_MODEL),
+    text,
+    voice: "Kore",
+    instructions: "Read this calmly and clearly, at a measured pace, like a public safety announcement.",
+    abortSignal: AbortSignal.timeout(50_000),
+  });
+  return { bytes: Buffer.from(audio.uint8Array), mediaType: audio.mediaType };
+}
 
 const firestore = new Firestore({
   projectId: PROJECT,
