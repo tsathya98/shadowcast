@@ -1,7 +1,7 @@
 <div align="center">
   <p>
     <a href="https://shadowcast-two.vercel.app">
-      <img width="100%" src="docs/images/banner.svg" alt="ShadowCast: forecasts say where a cyclone goes. ShadowCast says what it will break, and proves it by satellite."></a>
+      <img width="100%" src="docs/images/banner.svg" alt="ShadowCast names the sites a cyclone will knock out, and when, then checks itself by satellite after landfall."></a>
   </p>
 
 <div>
@@ -37,7 +37,7 @@
 
 ## What it does
 
-A forecast says where a cyclone will go and how strong it will be. A district collector needs to know **which** hospital loses power, **which** shelter gets hurricane-force wind, and **how long** there is to act. ShadowCast turns the track into that list for every named site on the coast, then runs a four-step loop:
+A forecast gives a cyclone's track and strength. A district collector has to decide which hospital will lose power, which shelter will get hurricane-force wind, and how long there is to act. ShadowCast turns the track into that list for every named site on the coast, in four steps:
 
 ```mermaid
 flowchart LR
@@ -54,10 +54,19 @@ flowchart LR
 |---|---|
 | **Predict** | The track (IBTrACS best track, or each ECMWF ensemble forecast *as issued*) drives a Holland (1980) parametric wind field at every site, densified to 15-minute steps, R-CLIPER storm rain, a storm-surge model along the coast, and the same hazard along every arterial road |
 | **Prioritise** | Sites are ranked by calibrated outage probability × criticality (hospitals and shelters 5, substations 4, …, schools 2). Every rank carries plain-language reasons |
-| **Prepare** | Gemini drafts officer actions and a public CAP 1.2 advisory in English, Hindi and the region's language. **Nothing is issued without an officer's approval**. Once approved, the advisory is published straight away on a public CAP feed, and every decision is audited |
+| **Prepare** | Gemini drafts officer actions and a public CAP 1.2 advisory in English, Hindi and the region's language. Nothing is issued until an officer approves it. An approved advisory goes straight onto a public CAP feed, and every decision is audited |
 | **Prove** | NASA VIIRS night-light loss is measured around every lit substation after landfall, and Gemini reads the before/after satellite images. Rain is scored against NASA GPM and surge against IMD. Skill and failures are published per storm |
 
-The console opens on the **Brief** tab: a **live** card with the cyclones GDACS is tracking and the official NDMA SACHET warnings in force for the region's state right now, **IMD's own bulletin as Gemini read it from the PDF**, the situation in two sentences, exception tiles (sites at risk, how many gales have reached, the next site in line), recommended actions per agency (health, power utility, district administration, water supply, police and fire), each due before gales reach its first site, an evacuation action for sites the surge would flood, a public-works action for the arterial roads that will be cut (due before the first one closes), **anticipatory finance** (an illustrative parametric cover per district, with its trigger time, or its odds of paying out under a forecast), and the latest officer decisions from the audit log. The numbers are computed from the ranked sites, not by Gemini, and they update as you scrub the timeline.
+The console opens on the **Brief** tab, which has:
+
+- a live card with the cyclones GDACS is tracking and the NDMA SACHET warnings in force for the region's state today;
+- IMD's own bulletin, as Gemini read it from the PDF;
+- the situation in two sentences, and tiles for sites at risk, how many gales have reached and the next site in line;
+- an action for each agency (health, power utility, district administration, water supply, police and fire), due before gales reach its first site, plus an evacuation action for sites the surge would flood and a public-works action for the arterial roads that will be cut;
+- anticipatory finance: an illustrative parametric cover per district, with its trigger time, or its odds of paying out under a forecast;
+- the latest officer decisions from the audit log.
+
+ShadowCast's code computes these numbers from the ranked sites (Gemini sets none of them), and they update as you scrub the timeline.
 
 <table>
   <tr>
@@ -82,8 +91,8 @@ The console opens on the **Brief** tab: a **live** card with the cyclones GDACS 
 
 Impact-based forecasting is not new, and ShadowCast stands on work like [CLIMADA](https://github.com/CLIMADA-project/climada_python) (ETH Zürich), the [510 / Netherlands Red Cross](https://www.510.global/) impact-based forecasting models and NDMA's Web-DCRA cyclone risk atlas. Three things are different here:
 
-1. **An outage model learned from real outages.** Truth is not a damage survey or an assumed fragility curve: it is NASA VIIRS night-light loss (VNP46A2) around **200 lit substations** during Cyclone Fani. A logistic model on modelled peak wind fits those outages and crosses 50 % outage probability at **≈107 kt**.
-2. **The forecast as it was issued, not hindsight.** ShadowCast replays ECMWF's ensemble tracks from each issue time and runs every member through the same wind and outage model, giving per-site odds of gales, hurricane-force wind and power loss from **68 h to 20 h before landfall** (Cyclone Dana 2024: 36 to 52 members on the storm per run).
+1. **An outage model learned from real outages.** Where other models use damage surveys or assumed fragility curves, ShadowCast's truth is NASA VIIRS night-light loss (VNP46A2) around 200 lit substations during Cyclone Fani. A logistic model on modelled peak wind fits those outages and crosses 50 % outage probability at about 107 kt.
+2. **Forecasts as they were issued.** ShadowCast replays ECMWF's ensemble tracks from each issue time and runs every member through the same wind and outage model, giving per-site odds of gales, hurricane-force wind and power loss from 68 h to 20 h before landfall (Cyclone Dana 2024: 36 to 52 members on the storm per run).
 3. **It checks itself after every storm, and publishes the misses.** The same satellite truth scores each storm once, with the Fani-fitted model and no refitting. Amphan 2020 fails, and the README and console say so.
 
 ## Validation
@@ -97,10 +106,10 @@ The outage model is fitted once, on Fani (2019), then scored without refitting. 
 | Storm | Test | ROC AUC | Brier | What it shows |
 |---|---|---|---|---|
 | Fani 2019, Odisha | In sample | **0.973** | 0.049 | Above 100 kt substations lost a median 77 % of their lights; at or below 80 kt, about 0 % |
-| Fani 2019, Odisha | Spatial holdout: 5 latitude blocks, each hidden in turn | **0.969** | 0.050 | Within held-out stretches that had outages: 0.85–0.94. The model does not overfit one stretch of coast |
+| Fani 2019, Odisha | Spatial holdout: 5 latitude blocks, each hidden in turn | **0.969** | 0.050 | Within held-out stretches that had outages: 0.85 to 0.94, so the fit does not depend on one stretch of coast |
 | Hudhud 2014, North Andhra | Untouched test storm, another state and grid | **0.79** | 0.19 | Transfers to a direct strong hit on Visakhapatnam (Spearman 0.56) |
-| Amphan 2020, West Bengal | Held out | 0.44 | 0.28 | **Fails.** Modelled wind saturates over land, and the rural grid failed widely regardless of local wind |
-| Dana 2024, Odisha | Held out, weak storm | (0.32) | 0.02 | Only 5 of 252 substations went dark, so AUC is meaningless. **No false alarms** |
+| Amphan 2020, West Bengal | Held out | 0.44 | 0.28 | Fails: modelled wind saturates over land, and the rural grid failed widely regardless of local wind |
+| Dana 2024, Odisha | Held out, weak storm | (0.32) | 0.02 | Only 5 of 252 substations went dark, so AUC is meaningless; there were no false alarms |
 
 <p align="center">
   <img width="60%" src="docs/images/fani-light-loss.png" alt="Fani 2019 median night-light loss at substations by modelled peak wind: below 60 kt about 0 %, 60 to 80 kt about 0 %, 80 to 100 kt 2 %, 100 to 130 kt 77 %">
@@ -129,18 +138,18 @@ Every OpenStreetMap motorway, trunk and primary road in a region is sampled ever
 
 ### Storm surge vs IMD
 
-Surge is a physics screening model, not a lookup table. Along a coast-normal transect from every open-coast cell of ETOPO1 bathymetry out to the shelf edge, the steady 1D wind-setup equation is integrated shoreward using the onshore stress of the Holland wind field (Garratt drag, capped for hurricane winds), plus the inverse-barometer rise from the Holland pressure profile. The crest is carried inland at 1 m per 14.5 km and compared with **bare-earth DeltaDTM** ground (rooftop-height surface models make every hospital look high and dry). Each storm is compared once with what IMD reported:
+Surge comes from a physics screening model. Along a coast-normal transect from every open-coast cell of ETOPO1 bathymetry out to the shelf edge, the steady 1D wind-setup equation is integrated shoreward using the onshore stress of the Holland wind field (Garratt drag, capped for hurricane winds), plus the inverse-barometer rise from the Holland pressure profile. The crest is carried inland at 1 m per 14.5 km and compared with **bare-earth DeltaDTM** ground (rooftop-height surface models make every hospital look high and dry). Each storm is compared once with what IMD reported:
 
 | Storm | Where IMD reported it | IMD | ShadowCast (max on that coast) |
 |---|---|---|---|
 | Fani 2019 | Puri coast (IMD estimate at landfall) | 1.5 m | 2.3 m |
 | Hudhud 2014 | Visakhapatnam port (**tide gauge**) | 1.4 m | 1.7 m |
 | Amphan 2020 | South and North 24 Parganas (post-storm survey) | 4.6 m | 3.8 m |
-| Dana 2024 | Kendrapara, Bhadrak and Balasore (IMD estimate) | 1–2 m | 2.8 m |
+| Dana 2024 | Kendrapara, Bhadrak and Balasore (IMD estimate) | 1 to 2 m | 2.8 m |
 
 It gets the order of magnitude and the ranking of storms right (Amphan's wide, shallow shelf gives by far the highest surge) and runs high on narrow shelves, as 1D setup models do. There is no astronomical tide, wave setup or river flow.
 
-**A fix that was reverted.** We tried adding inland decay (Kaplan & DeMaria 1995) and terrain roughness (ESA WorldCover) to the wind model. It made the Fani spatial holdout worse (0.87), so it was reverted; see the commit history. Amphan is published as it is: the Prove step exists to catch exactly this kind of miss before anyone relies on the model in a new grid.
+We tried adding inland decay (Kaplan & DeMaria 1995) and terrain roughness (ESA WorldCover) to the wind model. It made the Fani spatial holdout worse (0.87), so we reverted it; the commit history has both versions. Amphan stays published as a miss, because the Prove step is there to catch that kind of failure before anyone relies on the model in a new grid.
 
 <details>
 <summary><b>As-issued ensemble replay: Cyclone Dana 2024</b></summary>
@@ -156,7 +165,7 @@ ECMWF's IFS ensemble tropical-cyclone track file for each issue time comes from 
 | 23 Oct 12Z | 32 h | 52 | 1,979 |
 | 24 Oct 00Z | 20 h | 52 | 1,925 |
 
-At 44 h the top priorities are Mahakalapada shelters and Paradip hospitals: 94–96 % of members bring gales, arriving around 24 Oct 05:00 UTC, about 15 h before landfall. No member brings hurricane-force wind, so outage probabilities stay near zero, which matches the observed lack of widespread blackouts. Ensemble peak winds are biased low (about 43 kt median vs Dana's 65 kt), a known limitation of global-model tracker winds; gale probability and arrival time are the robust outputs.
+At 44 h the top priorities are Mahakalapada shelters and Paradip hospitals: 94 to 96 % of members bring gales, arriving around 24 Oct 05:00 UTC, about 15 h before landfall. No member brings hurricane-force wind, so outage probabilities stay near zero, which matches the observed lack of widespread blackouts. Ensemble peak winds are biased low (about 43 kt median vs Dana's 65 kt), a known limitation of global-model tracker winds; gale probability and arrival time are the more reliable outputs.
 
 </details>
 
@@ -180,17 +189,17 @@ The **Prepare** tab is an agent on **Gemini 3.8 Flash on Vertex AI** (AI SDK `To
 
 | | |
 |---|---|
-| **Tools** | `searchAssets` queries the geo API, scoped to the replay being viewed. `officialBulletin` returns IMD's bulletin for the storm. `issueAdvisory` drafts officer actions per site plus a public **CAP 1.2** message in English, Hindi and the region's language (Odia, Telugu or Bengali), validated against a schema |
-| **Reads IMD's PDFs** | Gemini reads each storm's last archived pre-landfall IMD national bulletin straight from the PDF into a validated schema (position, wind, landfall, surge and districts, rainfall, expected damage, IMD's actions), cached in Firestore. The Brief shows it next to ShadowCast's numbers, and the analyst keeps advisories consistent with it: **IMD is the authority** |
+| **Tools** | `searchAssets` queries the geo API, scoped to the replay being viewed. `officialBulletin` returns IMD's bulletin for the storm. `issueAdvisory` drafts officer actions per site plus a public CAP 1.2 message in English, Hindi and the region's language (Odia, Telugu or Bengali), validated against a schema |
+| **Reads IMD's PDFs** | Gemini reads each storm's last archived pre-landfall IMD national bulletin straight from the PDF into a validated schema (position, wind, landfall, surge and districts, rainfall, expected damage, IMD's actions), cached in Firestore. The Brief shows it next to ShadowCast's numbers, and the analyst keeps advisories consistent with it, since IMD is the authority |
 | **Hears and sees** | The officer can ask by voice in any language (recorded in the browser, re-encoded as 16 kHz WAV and heard by Gemini directly, no separate speech-to-text), or attach a field photo, a PDF or an audio clip |
 | **Reads the satellites** | Gemini compares the region's VIIRS night lights before and after the storm (rendered by Earth Engine on one scale) and reports where the lights went out, how badly, what stayed lit and whether that agrees with ShadowCast's forecast. For Fani: Khordha, Puri and Cuttack totally dark, which agrees |
 | **Human in the loop** | `issueAdvisory` needs an officer's approval on a card. Approvals are HMAC-signed so they cannot be forged; rejections are recorded too |
-| **Dispatch** | Approving an advisory publishes it on a public **CAP 1.2 Atom feed**, [`/api/cap`](https://shadowcast-two.vercel.app/api/cap). That is the form alert aggregators such as NDMA SACHET and Google Public Alerts poll, so no one has to send it by hand. Messages stay marked `Exercise` |
-| **Audit** | Every decision is written once to an append-only **Firestore** audit log |
-| **Voice** | **Gemini 2.5 Flash TTS** reads approved advisories aloud in each language (classic Cloud Text-to-Speech has no Odia voice) |
+| **Dispatch** | Approving an advisory publishes it on a public CAP 1.2 Atom feed, [`/api/cap`](https://shadowcast-two.vercel.app/api/cap). That is the form alert aggregators such as NDMA SACHET and Google Public Alerts poll, so no one has to send it by hand. Messages stay marked `Exercise` |
+| **Audit** | Every decision is written once to an append-only Firestore audit log |
+| **Voice** | Gemini 2.5 Flash TTS reads approved advisories aloud in each language (classic Cloud Text-to-Speech has no Odia voice) |
 | **Guardrails** | Gemini never sets a probability: every number it quotes comes from ShadowCast's deterministic model through the geo API. In forecast replays it never sees the outcome |
 
-ShadowCast produces **draft** advisories for authorised officials. IMD and NDMA remain the authoritative sources for warnings.
+ShadowCast produces draft advisories for authorised officials. IMD and NDMA remain the authoritative sources for warnings.
 
 ## Architecture
 
@@ -248,12 +257,12 @@ flowchart LR
 - **Console** ([`apps/web`](apps/web)): Next.js 16 (App Router), React 19, Tailwind 4 on Vercel. Data is fetched client-side with SWR through the same-origin `/api/geo/*` rewrite, so the API location is server configuration only.
 - **Keyless access:** Vercel's OIDC token is exchanged through Workload Identity Federation for short-lived credentials of a service account that may only call Vertex AI and use Firestore. There is no service-account key anywhere.
 - **geo API** ([`services/geo`](services/geo)): FastAPI on Cloud Run. It serves the built scenarios and computes wind at every site at any moment for the timeline scrubber. It also serves the before/after VIIRS images that Earth Engine rendered at build time, which `/api/evidence` hands to Gemini to read.
-- **Storage is all Google Cloud:** built scenarios and the feed archive in Cloud Storage, the audit log and bulletin readings in Firestore (free tier). Nothing is kept on local disk or in the browser.
+- **Storage:** all on Google Cloud, with built scenarios and the feed archive in Cloud Storage, the audit log and bulletin readings in Firestore (free tier). Nothing is kept on local disk or in the browser.
 - **Archiver** ([`services/archiver`](services/archiver)): a Cloud Run Job that snapshots the feeds with no public history (GDACS, NDMA SACHET CAP alerts, IBTrACS provisional, WeatherNext 2 via Open-Meteo) every 6 h, triggered by Cloud Scheduler, so any storm, including one forming during judging, can be replayed later as issued.
 
 ## Coverage
 
-Three coasts, four storms, every site named. Nothing synthetic.
+Three coasts and four storms, with every site named and no synthetic data.
 
 | Region | Storms | Sites | Advisory languages |
 |---|---|---|---|
