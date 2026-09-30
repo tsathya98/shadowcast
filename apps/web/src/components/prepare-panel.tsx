@@ -321,84 +321,82 @@ export function PreparePanel({ context, suggestions, onSelectAsset }: PreparePan
             {notice && <span className="text-xs text-[var(--text-muted)]">{notice}</span>}
           </div>
         )}
+        <input
+          ref={picker}
+          type="file"
+          multiple
+          accept="image/*,application/pdf,audio/*"
+          onChange={(event) => void attach(event.target.files)}
+          className="hidden"
+        />
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => picker.current?.click()}
+            disabled={busy}
+            aria-label="Attach a photo, PDF or audio"
+            title="Attach a photo, PDF or audio"
+            className="btn-ghost grid size-8 place-items-center disabled:opacity-40"
+          >
+            <Paperclip className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => void toggleVoice()}
+            disabled={busy || calling}
+            aria-label={recorder ? "Stop and send the voice question" : "Ask by voice"}
+            title={recorder ? "Stop and send" : "Record a voice question"}
+            aria-pressed={recorder != null}
+            className={clsx(
+              "grid size-8 place-items-center disabled:opacity-40",
+              recorder ? "btn-primary animate-pulse" : "btn-ghost",
+            )}
+          >
+            <Mic className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              player.current?.pause();
+              setCalling(true);
+            }}
+            disabled={calling || recorder != null}
+            aria-label="Start a live voice call"
+            title="Talk with the analyst, and interrupt it, in real time"
+            className="btn-ghost flex h-8 items-center gap-1.5 px-2.5 text-xs disabled:opacity-40"
+          >
+            <Phone className="size-3.5" /> Live call
+          </button>
+          <label className="ml-auto flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+            Reply in
+            <select
+              value={language ?? "auto"}
+              onChange={(event) => setLanguage(event.target.value === "auto" ? null : (event.target.value as Language))}
+              aria-label="Reply language"
+              className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface-2)] px-1.5 py-1 text-xs text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+            >
+              <option value="auto">my language</option>
+              {LANGUAGE_CODES.map((code) => (
+                <option key={code} value={code}>
+                  {LANGUAGES[code].label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="flex items-end gap-2">
-          <input
-            ref={picker}
-            type="file"
-            multiple
-            accept="image/*,application/pdf,audio/*"
-            onChange={(event) => void attach(event.target.files)}
-            className="hidden"
+          <textarea
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) submit(event);
+            }}
+            rows={2}
+            maxLength={2000}
+            placeholder="Ask the duty analyst…"
+            aria-label="Message the duty analyst"
+            className="min-h-0 flex-1 resize-none rounded-2xl border border-[var(--line-strong)] bg-[var(--surface-2)] px-3.5 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
           />
-          <div className="flex flex-col gap-1">
-            <button
-              type="button"
-              onClick={() => picker.current?.click()}
-              disabled={busy}
-              aria-label="Attach a photo, PDF or audio"
-              className="btn-ghost grid size-9 place-items-center disabled:opacity-40"
-            >
-              <Paperclip className="size-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void toggleVoice()}
-              disabled={busy || calling}
-              aria-label={recorder ? "Stop and send the voice question" : "Ask by voice"}
-              aria-pressed={recorder != null}
-              className={clsx(
-                "grid size-9 place-items-center disabled:opacity-40",
-                recorder ? "btn-primary animate-pulse" : "btn-ghost",
-              )}
-            >
-              <Mic className="size-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                player.current?.pause();
-                setCalling(true);
-              }}
-              disabled={calling || recorder != null}
-              aria-label="Start a live voice call"
-              title="Live voice call: talk with the analyst, and interrupt it, in real time"
-              className="btn-ghost grid size-9 place-items-center disabled:opacity-40"
-            >
-              <Phone className="size-4" />
-            </button>
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <label className="flex items-center gap-1.5 self-start text-xs text-[var(--text-muted)]">
-              Reply in
-              <select
-                value={language ?? "auto"}
-                onChange={(event) =>
-                  setLanguage(event.target.value === "auto" ? null : (event.target.value as Language))
-                }
-                aria-label="Reply language"
-                className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface-2)] px-1.5 py-0.5 text-xs text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
-              >
-                <option value="auto">the language I use</option>
-                {LANGUAGE_CODES.map((code) => (
-                  <option key={code} value={code}>
-                    {LANGUAGES[code].label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <textarea
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) submit(event);
-              }}
-              rows={2}
-              maxLength={2000}
-              placeholder="Ask the duty analyst…"
-              aria-label="Message the duty analyst"
-              className="min-h-0 w-full resize-none rounded-2xl border border-[var(--line-strong)] bg-[var(--surface-2)] px-3.5 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
-            />
-          </div>
           {busy ? (
             <button
               type="button"
