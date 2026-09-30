@@ -13,7 +13,7 @@ import { LiveAlerts } from "@/components/live-alerts";
 import { PreparePanel } from "@/components/prepare-panel";
 import { ReplayStrip } from "@/components/replay-strip";
 import { Timeline } from "@/components/timeline";
-import { useAssets, useForecastTracks, useHazard, useRoads, useScenario, useSurge, useTrack } from "@/lib/api";
+import { useAssets, useForecastTracks, useHazard, useLive, useRoads, useScenario, useSurge, useTrack } from "@/lib/api";
 import { LANGUAGES, REGION_LANGUAGE } from "@/lib/advisory";
 import { liveAlerts } from "@/lib/alerts";
 import { dutyBrief } from "@/lib/brief";
@@ -77,6 +77,10 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   const [playing, setPlaying] = useState(false);
 
   const { data: scenario, error: scenarioError } = useScenario(scenarioId);
+  // Say up front why the map shows a past storm: whether GDACS is tracking one now, and that replays use the forecasts
+  // as they were issued.
+  const { data: live } = useLive();
+  const activeNow = live?.cyclones.flatMap((c) => (c.current && c.name ? [c.name] : [])) ?? [];
   const { data: track } = useTrack(scenarioId);
   const { data: page, isLoading: assetsLoading } = useAssets(scenarioId, mode);
   const { data: members } = useForecastTracks(scenarioId, mode);
@@ -230,6 +234,13 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
             ))}
           </select>
         </div>
+
+        {live && (
+          <p className="label glass rounded-full px-3 py-1.5 lg:pointer-events-auto">
+            {activeNow.length ? `GDACS is tracking ${activeNow.join(", ")} now` : "No cyclone active now"} · past storms
+            replayed as forecast at the time
+          </p>
+        )}
 
         <div className="lg:pointer-events-auto">
           <ReplayStrip forecasts={scenario?.forecasts ?? []} mode={mode} onChange={changeMode} />
