@@ -54,7 +54,7 @@ flowchart LR
 |---|---|
 | **Predict** | The track (IBTrACS best track, or each ECMWF ensemble forecast *as issued*) drives a Holland (1980) parametric wind field at every site, densified to 15-minute steps, R-CLIPER storm rain, a storm-surge model along the coast, and the same hazard along every arterial road |
 | **Prioritise** | Sites are ranked by calibrated outage probability × criticality (hospitals and shelters 5, substations 4, …, schools 2). Every rank carries plain-language reasons |
-| **Prepare** | Gemini drafts officer actions and a public CAP 1.2 advisory in English, Hindi and the region's language. **Nothing is issued without an officer's approval**, and every decision is audited |
+| **Prepare** | Gemini drafts officer actions and a public CAP 1.2 advisory in English, Hindi and the region's language. **Nothing is issued without an officer's approval**. Once approved, the advisory is published straight away on a public CAP feed, and every decision is audited |
 | **Prove** | NASA VIIRS night-light loss is measured around every lit substation after landfall, and Gemini reads the before/after satellite images. Rain is scored against NASA GPM and surge against IMD. Skill and failures are published per storm |
 
 The console opens on the **Brief** tab: a **live** card with the cyclones GDACS is tracking and the official NDMA SACHET warnings in force for the region's state right now, **IMD's own bulletin as Gemini read it from the PDF**, the situation in two sentences, exception tiles (sites at risk, how many gales have reached, the next site in line), recommended actions per agency (health, power utility, district administration, water supply, police and fire), each due before gales reach its first site, an evacuation action for sites the surge would flood, a public-works action for the arterial roads that will be cut (due before the first one closes), **anticipatory finance** (an illustrative parametric cover per district, with its trigger time, or its odds of paying out under a forecast), and the latest officer decisions from the audit log. The numbers are computed from the ranked sites, not by Gemini, and they update as you scrub the timeline.
@@ -185,7 +185,8 @@ The **Prepare** tab is an agent on **Gemini 3.8 Flash on Vertex AI** (AI SDK `To
 | **Hears and sees** | The officer can ask by voice in any language (recorded in the browser, re-encoded as 16 kHz WAV and heard by Gemini directly, no separate speech-to-text), or attach a field photo, a PDF or an audio clip |
 | **Reads the satellites** | Gemini compares the region's VIIRS night lights before and after the storm (rendered by Earth Engine on one scale) and reports where the lights went out, how badly, what stayed lit and whether that agrees with ShadowCast's forecast. For Fani: Khordha, Puri and Cuttack totally dark, which agrees |
 | **Human in the loop** | `issueAdvisory` needs an officer's approval on a card. Approvals are HMAC-signed so they cannot be forged; rejections are recorded too |
-| **Audit** | Every decision is written once to an append-only **Firestore** audit log; approved advisories download as CAP XML |
+| **Dispatch** | Approving an advisory publishes it on a public **CAP 1.2 Atom feed**, [`/api/cap`](https://shadowcast-two.vercel.app/api/cap). That is the form alert aggregators such as NDMA SACHET and Google Public Alerts poll, so no one has to send it by hand. Messages stay marked `Exercise` |
+| **Audit** | Every decision is written once to an append-only **Firestore** audit log |
 | **Voice** | **Gemini 2.5 Flash TTS** reads approved advisories aloud in each language (classic Cloud Text-to-Speech has no Odia voice) |
 | **Guardrails** | Gemini never sets a probability: every number it quotes comes from ShadowCast's deterministic model through the geo API. In forecast replays it never sees the outcome |
 
@@ -199,7 +200,7 @@ flowchart LR
 
     subgraph vercel["Vercel"]
         web["Next.js 16 console<br/>deck.gl overlays"]
-        routes["Agent routes<br/>/api/agent · /api/advisories<br/>/api/advisories/[id]/audio (TTS)<br/>/api/bulletins · /api/evidence"]
+        routes["Agent routes<br/>/api/agent · /api/advisories<br/>/api/advisories/[id]/audio (TTS)<br/>/api/bulletins · /api/evidence<br/>/api/cap (CAP feed)"]
     end
 
     subgraph gcp["Google Cloud"]
@@ -220,6 +221,7 @@ flowchart LR
 
     feeds["GDACS · NDMA SACHET<br/>IBTrACS · Open-Meteo"]
     imd["IMD bulletins (PDF)"]
+    aggregators["Alert aggregators<br/>NDMA SACHET · Google Public Alerts"]
 
     user --> web
     web -->|"base map"| maps
@@ -235,6 +237,7 @@ flowchart LR
     feeds --> job --> archive
     archive -->|"/live"| geo
     imd -->|"read by Gemini"| routes
+    aggregators -.->|"poll CAP Atom feed<br/>/api/cap"| routes
 
     classDef accent fill:#16191c,stroke:#F28A2E,color:#ffffff
     classDef store fill:#16191c,stroke:#8F8E86,color:#ffffff
