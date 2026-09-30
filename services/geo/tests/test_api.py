@@ -126,7 +126,8 @@ def test_not_found(client: TestClient, path: str) -> None:
 
 
 def test_empty_store_serves_no_scenarios(tmp_path: Path) -> None:
-    with TestClient(create_app(Settings(), MemoryArtifacts())) as empty:
+    empty_store = MemoryArtifacts()
+    with TestClient(create_app(Settings(), empty_store, empty_store)) as empty:
         assert empty.get("/health").json() == {"status": "ok", "scenarios": []}
         assert empty.get("/scenarios").json() == []
 
