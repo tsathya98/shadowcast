@@ -11,7 +11,7 @@ REGION="${REGION:-asia-south1}"
 BUCKET="${BUCKET:-${PROJECT}-scenarios}"
 ARCHIVE_BUCKET="${ARCHIVE_BUCKET:-${PROJECT}-archive}"
 SERVICE="${SERVICE:-shadowcast-geo}"
-ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-*}"
+ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-https://shadowcast-two.vercel.app,http://localhost:3000}"
 SA_NAME="shadowcast-geo"
 SA="${SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,9 +36,12 @@ for bucket in "${BUCKET}" "${ARCHIVE_BUCKET}"; do
   "${GCLOUD[@]}" storage buckets add-iam-policy-binding "gs://${bucket}" \
     --member="serviceAccount:${SA}" --role="roles/storage.objectViewer" >/dev/null
 done
+# Voice calls: Gemini Live on Vertex AI.
+"${GCLOUD[@]}" projects add-iam-policy-binding "${PROJECT}" --member="serviceAccount:${SA}"   --role="roles/aiplatform.user" --condition=None >/dev/null
 
 echo "==> Cloud Run service ${SERVICE} (${REGION})"
-# Public, read-only endpoints serving data derived from public sources; instance count capped to bound cost.
+# Public, read-only endpoints serving data derived from public sources, plus voice calls from the console's origins
+# only; instance count capped to bound cost.
 "${GCLOUD[@]}" run deploy "${SERVICE}" \
   --source="${ROOT}/services/geo" \
   --region="${REGION}" \

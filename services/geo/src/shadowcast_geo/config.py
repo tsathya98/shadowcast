@@ -322,6 +322,10 @@ class Settings:
         allowed_origins: CORS origins allowed to call the API.
         archive_bucket: GCS bucket the feed archiver writes to (read for the live picture).
         live_ttl_s: How long the live digest is served before the archive is read again.
+        project: Google Cloud project whose Vertex AI serves the voice calls.
+        live_location: Vertex AI region of the Gemini Live model.
+        voice_call_s: Longest voice call, in seconds (below Cloud Run's request timeout).
+        voice_calls: Voice calls one instance serves at once.
     """
 
     bucket: str = "argmax-cyclone-2026-scenarios"
@@ -333,6 +337,10 @@ class Settings:
     allowed_origins: tuple[str, ...] = ("*",)
     archive_bucket: str = "argmax-cyclone-2026-archive"
     live_ttl_s: float = 900.0
+    project: str = "argmax-cyclone-2026"
+    live_location: str = "us-central1"
+    voice_call_s: float = 240.0
+    voice_calls: int = 4
 
     @classmethod
     def from_env(cls) -> Settings:

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -110,3 +114,105 @@ def assets() -> pd.DataFrame:
             "lon": [86.05, 86.4, 86.2, 88.5],
         }
     )
+
+
+def make_asset(
+    asset_id: str, rank: int, kind: str, score: float, lon: float, name: str | None = None
+) -> dict[str, Any]:
+    return {
+        "asset_id": asset_id, "rank": rank, "kind": kind, "name": name, "source": "OpenStreetMap",
+        "lat": 19.5, "lon": lon, "peak_wind_kt": 110.0, "peak_time": "2019-05-02T21:00:00Z", "min_dist_km": 5.0,
+        "closest_time": "2019-05-02T21:00:00Z", "band_kt": 64, "band_entry": "2019-05-02T18:00:00Z",
+        "population": 1000.0, "elevation_m": 3.0, "criticality": 5, "p_outage": 0.9, "score": score,
+        "observed_loss_pct": None, "reasons": ["Modelled peak wind 110 kt"], "extra_field": "ignored",
+    }  # fmt: skip
+
+
+@pytest.fixture
+def store() -> MemoryArtifacts:
+    artifacts = MemoryArtifacts()
+    region = {"id": "odisha-coast", "name": "Odisha coast", "bbox": [19.0, 84.4, 21.7, 87.6]}
+    summary = {"id": "fani-2019", "storm": "Fani", "season": 2019, "region": region,
+               "landfall": "2019-05-03T03:30:00Z", "peak_vmax_kt": 150.0}  # fmt: skip
+    artifacts.write_json("scenarios/index.json", [summary])
+    artifacts.write_json("scenarios/fani-2019/scenario.json", {
+        **summary, "track_source": "IBTrACS best track", "asset_counts": {"hospital": 1, "school": 1},
+        "model": {"intercept": -12.8, "slope": 0.128}, "skill": {"auc": 0.91, "out_of_sample": False},
+        "loss_by_band": [{"low_kt": 100.0, "high_kt": 130.0, "n": 36.0, "median": 82.0}],
+        "rain": {"model": "R-CLIPER", "truth": "GPM IMERG", "n": 2, "spearman": 0.7, "median_ratio": 1.2,
+                 "max_modelled_mm": 180.0, "max_observed_mm": 150.0, "extreme_sites": 0},
+        "insurance": {"terms": "illustrative", "districts": []},
+        "roads": {"roads": 1, "km": 10, "km_cut": 10, "km_at_risk": 0, "first_closure": "2019-05-02T22:00:00Z",
+                  "cut_by_surge": 0},
+        "surge": {"peak_m": 1.5, "lat": 19.8, "lon": 85.8, "time": "2019-05-03T03:00:00Z", "coast_points": 1,
+                  "flooded_sites": 0, "method": "1D wind setup"},
+        "forecasts": [{"key": "20190501T12Z", "issued": "2019-05-01T12:00:00Z", "lead_h": 39.5, "storm_id": "01B",
+                       "members": 52, "assets_likely_gale": 1, "assets_likely_hurricane": 0, "max_p_outage": 0.4,
+                       "source": "ECMWF IFS ensemble"}],
+        "built_at": "2026-09-26T00:00:00Z",
+    })  # fmt: skip
+    artifacts.write_json("scenarios/fani-2019/track.json", make_fixes())
+    artifacts.write_json("scenarios/fani-2019/assets.json", [
+        make_asset("osm:node/1", 1, "hospital", 0.9, 86.05, "District Hospital Puri"),
+        make_asset("osm:way/2", 2, "school", 0.36, 86.4),
+    ])  # fmt: skip
+    artifacts.write_json("scenarios/fani-2019/backtest.json", {"skill": {"auc": 0.91}, "substations": []})
+    artifacts.write_json("scenarios/fani-2019/roads.json", {"type": "FeatureCollection", "features": []})
+    for name in ("night-lights-pre", "night-lights-post"):
+        artifacts.write_bytes(f"scenarios/fani-2019/evidence/{name}.png", f"png:{name}".encode(), "image/png")
+    artifacts.write_json("scenarios/fani-2019/surge.json", [
+        {"lat": 19.8, "lon": 85.8, "peak_m": 1.5, "setup_m": 0.8, "barometer_m": 0.7,
+         "peak_time": "2019-05-03T03:00:00Z"},
+    ])  # fmt: skip
+    forecast_asset = {**make_asset("osm:node/1", 1, "hospital", 0.4, 86.05), "p34": 0.9, "p64": 0.25, "wind_p10": 40.0,
+                      "wind_p90": 80.0, "members": 52, "p_rain": 0.1,
+                      "gale_arrival": "2019-05-02T18:00:00Z"}  # fmt: skip
+    artifacts.write_json("scenarios/fani-2019/forecasts/20190501T12Z/assets.json", [forecast_asset])
+    artifacts.write_json(
+        "scenarios/fani-2019/forecasts/20190501T12Z/tracks.json",
+        [{"member": 1, "fixes": make_fixes()}, {"member": 2, "fixes": make_fixes(lon=86.5, vmax=80.0)}],
+    )
+    return artifacts
+
+
+class FakeLiveSession:
+    """Scripted Gemini Live session: each turn is released once the officer has sent some audio."""
+
+    def __init__(self, turns: list[list[Any]], hang: bool = False) -> None:
+        self.turns = turns
+        self.hang = hang
+        self.audio: list[bytes] = []
+        self.tool_responses: list[Any] = []
+        self.heard = asyncio.Event()
+
+    async def send_realtime_input(self, *, audio: Any) -> None:
+        self.audio.append(audio.data)
+        self.heard.set()
+
+    async def send_tool_response(self, *, function_responses: list[Any]) -> None:
+        self.tool_responses.extend(function_responses)
+
+    async def receive(self) -> AsyncIterator[Any]:
+        await self.heard.wait()
+        if self.hang:
+            await asyncio.Event().wait()
+        if self.turns:
+            for message in self.turns.pop(0):
+                yield message
+
+
+class FakeLiveClient:
+    """Stand-in for ``google.genai.Client``: ``client.aio.live.connect`` opens the scripted session or fails."""
+
+    def __init__(self, session: FakeLiveSession | None = None, error: Exception | None = None) -> None:
+        self.session = session
+        self.error = error
+        self.configs: list[tuple[str, Any]] = []
+        self.aio = SimpleNamespace(live=SimpleNamespace(connect=self.connect))
+
+    @asynccontextmanager
+    async def connect(self, *, model: str, config: Any) -> AsyncGenerator[FakeLiveSession | None, None]:
+        if self.error:
+            raise self.error
+        self.configs.append((model, config))
+        yield self.session

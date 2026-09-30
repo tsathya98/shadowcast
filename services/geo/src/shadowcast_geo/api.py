@@ -15,9 +15,10 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 
 import numpy as np
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from google import genai
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
@@ -40,6 +41,7 @@ from shadowcast_geo.models import (
     SurgePoint,
     TimelinePoint,
 )
+from shadowcast_geo.voice import LANGUAGES, live_config, relay, tool_asset
 
 
 @dataclass(frozen=True)
@@ -379,8 +381,69 @@ async def forecast_assets(forecast: ForecastDep, query: AssetQueryDep) -> Foreca
     return ForecastAssetPage(total=total, items=items)
 
 
+@router.websocket("/scenarios/{scenario_id}/voice")
+async def voice(
+    websocket: WebSocket,
+    scenario_id: str,
+    forecast: str | None = None,
+    asset: str | None = None,
+    language: str | None = None,
+) -> None:
+    """Real-time voice call with the duty analyst (Gemini Live), scoped to the replay the officer is viewing.
+
+    The browser sends binary 16 kHz PCM from the microphone and receives 24 kHz PCM speech plus JSON events (see
+    ``shadowcast_geo.voice``). Calls are refused from other origins, for unknown replays, and while the instance is
+    already serving its limit of calls.
+
+    Args:
+        websocket: The browser's socket.
+        scenario_id: Scenario being replayed.
+        forecast: Forecast key being replayed, or None for the best track.
+        asset: Asset id selected on the map.
+        language: Reply language code, or None to follow the officer.
+    """
+    app = websocket.app
+    settings: Settings = app.state.settings
+    scenario = cast("dict[str, LoadedScenario]", app.state.scenarios).get(scenario_id)
+    replay = scenario.forecasts.get(forecast) if scenario and forecast else None
+    origin = websocket.headers.get("origin", "")
+    allowed = "*" in settings.allowed_origins or origin in settings.allowed_origins
+    if scenario is None or (forecast and replay is None) or (language and language not in LANGUAGES) or not allowed:
+        await websocket.close(code=1008)
+        return
+    calls: asyncio.Semaphore = app.state.voice_calls
+    if calls.locked():
+        await websocket.close(code=1013, reason="all voice lines are busy")
+        return
+    assets: Sequence[Asset] = replay.assets if replay else scenario.assets
+
+    def search(args: dict[str, Any]) -> dict[str, Any]:
+        query = AssetQuery(
+            q=args.get("query") or None, kind=args.get("kinds") or None, limit=min(int(args.get("limit") or 5), 10)
+        )
+        total, page = paginate(assets, query)
+        return {"total": total, "assets": [tool_asset(a) for a in page]}
+
+    async with calls:
+        await websocket.accept()
+        if app.state.live_client is None:
+            app.state.live_client = genai.Client(
+                vertexai=True, project=settings.project, location=settings.live_location
+            )
+        config = live_config(
+            scenario.detail,
+            replay.summary.issued if replay else None,
+            scenario.by_id.get(asset) if asset else None,
+            language,
+        )
+        await relay(websocket, app.state.live_client, config, search, settings.voice_call_s)
+
+
 def create_app(
-    settings: Settings | None = None, store: ArtifactStore | None = None, archive: ArchiveReader | None = None
+    settings: Settings | None = None,
+    store: ArtifactStore | None = None,
+    archive: ArchiveReader | None = None,
+    live_client: Any = None,
 ) -> FastAPI:
     """Build the FastAPI application.
 
@@ -388,6 +451,7 @@ def create_app(
         settings: Settings (defaults to the environment).
         store: Artifact store (defaults to the one selected by ``settings``).
         archive: Feed archive for the live picture (defaults to ``settings.archive_bucket``).
+        live_client: ``google.genai.Client`` for voice calls (created on the first call when None).
 
     Returns:
         FastAPI: The configured application.
@@ -398,6 +462,9 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.scenarios = load_scenarios(store or artifact_store(settings))
         app.state.live = LiveCache(archive or GcsArtifacts(settings.archive_bucket), settings.live_ttl_s)
+        app.state.settings = settings
+        app.state.live_client = live_client
+        app.state.voice_calls = asyncio.Semaphore(settings.voice_calls)
         yield
 
     app = FastAPI(
