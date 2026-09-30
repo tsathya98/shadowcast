@@ -48,7 +48,7 @@ export function BacktestPanel({ scenario }: { scenario: ScenarioDetail }) {
       </span>
       <p className="-mt-1 text-sm text-[var(--text-secondary)]">
         {skill.out_of_sample
-          ? `Held-out storm: the outage model was fitted on ${scenario.model.trained_on} and is scored here without refitting.`
+          ? `Held-out storm: the outage model was trained on Fani 2019 and is scored here without refitting.`
           : "Reference storm: the outage model is fitted here, then tested on other storms."}{" "}
         Truth is VIIRS night-light loss around {skill.n} lit substations.
       </p>
