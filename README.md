@@ -191,12 +191,13 @@ The **Prepare** tab is an agent on **Gemini 3.8 Flash on Vertex AI** (AI SDK `To
 |---|---|
 | **Tools** | `searchAssets` queries the geo API, scoped to the replay being viewed. `officialBulletin` returns IMD's bulletin for the storm. `issueAdvisory` drafts officer actions per site plus a public CAP 1.2 message in English, Hindi and the region's language (Odia, Telugu or Bengali), validated against a schema |
 | **Reads IMD's PDFs** | Gemini reads each storm's last archived pre-landfall IMD national bulletin straight from the PDF into a validated schema (position, wind, landfall, surge and districts, rainfall, expected damage, IMD's actions), cached in Firestore. The Brief shows it next to ShadowCast's numbers, and the analyst keeps advisories consistent with it, since IMD is the authority |
-| **Hears and sees** | The officer can ask by voice in any language (recorded in the browser, re-encoded as 16 kHz WAV and heard by Gemini directly, no separate speech-to-text), or attach a field photo, a PDF or an audio clip |
+| **Live voice calls** | The officer can call the analyst and talk: a real-time call over **Gemini Live** (`gemini-live-2.5-flash-native-audio` on Vertex AI) in Hindi, Odia, Telugu, Bengali, Tamil or English. The analyst answers aloud as it thinks, can be interrupted mid-sentence, and both sides are captioned. The geo service bridges the call and answers the analyst's `search_assets` lookups from the scenario in memory, so every number it speaks comes from ShadowCast's model. Calls are limited to the console's origins, four per instance and four minutes each |
+| **Hears and sees** | In the chat the officer can also send a voice note in any language (recorded in the browser, re-encoded as 16 kHz WAV and heard by Gemini directly, no separate speech-to-text), or attach a field photo, a PDF or an audio clip. A picker sets the language Gemini replies in |
 | **Reads the satellites** | Gemini compares the region's VIIRS night lights before and after the storm (rendered by Earth Engine on one scale) and reports where the lights went out, how badly, what stayed lit and whether that agrees with ShadowCast's forecast. For Fani: Khordha, Puri and Cuttack totally dark, which agrees |
 | **Human in the loop** | `issueAdvisory` needs an officer's approval on a card. Approvals are HMAC-signed so they cannot be forged; rejections are recorded too |
 | **Dispatch** | Approving an advisory publishes it on a public CAP 1.2 Atom feed, [`/api/cap`](https://shadowcast-two.vercel.app/api/cap). That is the form alert aggregators such as NDMA SACHET and Google Public Alerts poll, so no one has to send it by hand. Messages stay marked `Exercise` |
 | **Audit** | Every decision is written once to an append-only Firestore audit log |
-| **Voice** | Gemini 2.5 Flash TTS reads approved advisories aloud in each language (classic Cloud Text-to-Speech has no Odia voice) |
+| **Voice** | Gemini 2.5 Flash TTS reads approved advisories, and any chat reply, aloud in each language (classic Cloud Text-to-Speech has no Odia voice) |
 | **Guardrails** | Gemini never sets a probability: every number it quotes comes from ShadowCast's deterministic model through the geo API. In forecast replays it never sees the outcome |
 
 ShadowCast produces draft advisories for authorised officials. IMD and NDMA remain the authoritative sources for warnings.
@@ -209,12 +210,12 @@ flowchart LR
 
     subgraph vercel["Vercel"]
         web["Next.js 16 console<br/>deck.gl overlays"]
-        routes["Agent routes<br/>/api/agent · /api/advisories<br/>/api/advisories/[id]/audio (TTS)<br/>/api/bulletins · /api/evidence<br/>/api/cap (CAP feed)"]
+        routes["Agent routes<br/>/api/agent · /api/advisories<br/>/api/advisories/[id]/audio (TTS)<br/>/api/bulletins · /api/evidence<br/>/api/speak (TTS) · /api/cap (CAP feed)"]
     end
 
     subgraph gcp["Google Cloud"]
         maps["Google Maps Platform<br/>Maps JavaScript API"]
-        vertex["Vertex AI<br/>Gemini 3.8 Flash<br/>Gemini 2.5 Flash TTS"]
+        vertex["Vertex AI<br/>Gemini 3.8 Flash<br/>Gemini Live · Gemini 2.5 Flash TTS"]
         fs[("Firestore<br/>audit log · Gemini readings")]
         geo["Cloud Run<br/>geo API (FastAPI)"]
         gcs[("Cloud Storage<br/>built scenarios<br/>before/after VIIRS images")]
@@ -233,6 +234,8 @@ flowchart LR
     aggregators["Alert aggregators<br/>NDMA SACHET · Google Public Alerts"]
 
     user --> web
+    user <-->|"voice call (WebSocket)"| geo
+    geo <-->|"Gemini Live"| vertex
     web -->|"base map"| maps
     web -->|"/api/geo/* rewrite"| geo
     web --> routes
@@ -256,7 +259,7 @@ flowchart LR
 
 - **Console** ([`apps/web`](apps/web)): Next.js 16 (App Router), React 19, Tailwind 4 on Vercel. Data is fetched client-side with SWR through the same-origin `/api/geo/*` rewrite, so the API location is server configuration only.
 - **Keyless access:** Vercel's OIDC token is exchanged through Workload Identity Federation for short-lived credentials of a service account that may only call Vertex AI and use Firestore. There is no service-account key anywhere.
-- **geo API** ([`services/geo`](services/geo)): FastAPI on Cloud Run. It serves the built scenarios and computes wind at every site at any moment for the timeline scrubber. It also serves the before/after VIIRS images that Earth Engine rendered at build time, which `/api/evidence` hands to Gemini to read.
+- **geo API** ([`services/geo`](services/geo)): FastAPI on Cloud Run. It serves the built scenarios and computes wind at every site at any moment for the timeline scrubber. It also serves the before/after VIIRS images that Earth Engine rendered at build time, which `/api/evidence` hands to Gemini to read, and bridges live voice calls to Gemini Live over a WebSocket (`/scenarios/{id}/voice`).
 - **Storage:** all on Google Cloud, with built scenarios and the feed archive in Cloud Storage, the audit log and bulletin readings in Firestore (free tier). Nothing is kept on local disk or in the browser.
 - **Archiver** ([`services/archiver`](services/archiver)): a Cloud Run Job that snapshots the feeds with no public history (GDACS, NDMA SACHET CAP alerts, IBTrACS provisional, WeatherNext 2 via Open-Meteo) every 6 h, triggered by Cloud Scheduler, so any storm, including one forming during judging, can be replayed later as issued.
 
@@ -325,7 +328,7 @@ On the Odisha coast the 3,325 sites are 765 official OSDMA cyclone shelters plus
 
 | Layer | Technology |
 |---|---|
-| AI | Gemini 3.8 Flash on Vertex AI (duty analyst with tools; PDF, image and audio input; structured output), Gemini 2.5 Flash TTS |
+| AI | Gemini 3.8 Flash on Vertex AI (duty analyst with tools; PDF, image and audio input; structured output), Gemini Live (real-time voice calls with tools), Gemini 2.5 Flash TTS |
 | Geospatial | Google Earth Engine (VIIRS, GPM IMERG, WorldPop, DeltaDTM, Copernicus DEM, ETOPO1, geoBoundaries), ecCodes for ECMWF track files |
 | Backend | Python 3.12, FastAPI, uv, Cloud Run service and Cloud Run Job, Cloud Storage |
 | Frontend | Next.js 16 (App Router), React 19, Tailwind 4, Google Maps Platform + deck.gl, SWR |
