@@ -13,12 +13,14 @@ import { LiveAlerts } from "@/components/live-alerts";
 import { PreparePanel } from "@/components/prepare-panel";
 import { ReplayStrip } from "@/components/replay-strip";
 import { Timeline } from "@/components/timeline";
+import { WhatIfCard } from "@/components/what-if-card";
 import { useAssets, useForecastTracks, useHazard, useLive, useRoads, useScenario, useSurge, useTrack } from "@/lib/api";
 import { LANGUAGES, REGION_LANGUAGE } from "@/lib/advisory";
 import { liveAlerts } from "@/lib/alerts";
-import { dutyBrief } from "@/lib/brief";
+import { dutyBrief, FLOOD_M } from "@/lib/brief";
 import { type ColorBy, compactNumber, FLOOD_FULL_M, kindLabel, RAIN_FULL_MM, rampColor, rgbCss } from "@/lib/format";
 import type { ReplayMode, ScenarioSummary } from "@/lib/types";
+import { applyWhatIf, AS_MODELLED, type WhatIf } from "@/lib/whatif";
 
 // deck.gl and the Maps JS API need the browser: never render the map on the server.
 const MapView = dynamic(() => import("@/components/map-view").then((m) => m.MapView), {
@@ -49,6 +51,13 @@ const LEGEND_ENDS: Record<ColorBy, [string, string]> = {
   rain: ["0 mm", `${RAIN_FULL_MM} mm`],
 };
 const TABS = ["brief", "prioritise", "prepare", "prove"] as const;
+// What each tab answers in the problem statement's own words.
+const TAB_TOPICS: Record<(typeof TABS)[number], string> = {
+  brief: "surge · rain",
+  prioritise: "infrastructure",
+  prepare: "dispatch",
+  prove: "validation",
+};
 
 interface ConsoleProps {
   scenarios: ScenarioSummary[];
@@ -75,6 +84,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   const [colorBy, setColorBy] = useState<ColorBy>("risk");
   const [scrub, setScrub] = useState<{ scenarioId: string; ms: number } | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [whatIf, setWhatIf] = useState<WhatIf>(AS_MODELLED);
 
   const { data: scenario, error: scenarioError } = useScenario(scenarioId);
   // Say up front why the map shows a past storm: whether GDACS is tracking one now, and that replays use the forecasts
@@ -103,11 +113,37 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
   const quantised = timeMs == null ? null : new Date(Math.round(timeMs / QUANTUM_MS) * QUANTUM_MS).toISOString();
   const { data: hazard } = useHazard(scenarioId, mode.kind === "best-track" ? quantised : null);
   const windById = useMemo(
-    () => (hazard ? new Map(hazard.asset_ids.map((id, i) => [id, hazard.wind_kt[i]] as [string, number])) : null),
-    [hazard],
+    () =>
+      hazard
+        ? new Map(hazard.asset_ids.map((id, i) => [id, hazard.wind_kt[i] * whatIf.wind] as [string, number]))
+        : null,
+    [hazard, whatIf.wind],
   );
 
-  const assets = useMemo(() => page?.items ?? [], [page]);
+  // The what-if re-scores the best-track replay only: a forecast replay stays as it was issued.
+  const modelled = useMemo(() => page?.items ?? [], [page]);
+  const assets = useMemo(
+    () => (scenario && mode.kind === "best-track" ? applyWhatIf(modelled, scenario.model, whatIf) : modelled),
+    [modelled, scenario, mode.kind, whatIf],
+  );
+  const shownSurge = useMemo(
+    () =>
+      surge?.map((point) => ({
+        ...point,
+        peak_m: point.peak_m == null ? null : point.peak_m * whatIf.wind ** 2 + whatIf.tide_m,
+      })),
+    [surge, whatIf],
+  );
+  const whatIfCounts = useMemo(
+    () => ({
+      outage: [modelled, assets].map((list) => list.filter((a) => a.p_outage >= 0.5).length) as [number, number],
+      flooded: [modelled, assets].map((list) => list.filter((a) => (a.flood_m ?? 0) >= FLOOD_M).length) as [
+        number,
+        number,
+      ],
+    }),
+    [modelled, assets],
+  );
   const selected = assets.find((a) => a.asset_id === selectedId) ?? null;
   const atRisk = useMemo(() => assets.filter((a) => a.p_outage >= 0.5).length, [assets]);
   const alerts = useMemo(
@@ -144,6 +180,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
     setColorBy("risk");
     setSelectedId(null);
     setPlaying(false);
+    setWhatIf(AS_MODELLED);
   };
   const changeMode = (next: ReplayMode) => {
     setMode(next);
@@ -199,7 +236,7 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
             track={track}
             members={members}
             storm={mode.kind === "best-track" ? (hazard?.storm ?? null) : null}
-            surge={surge}
+            surge={shownSurge}
             roads={roads}
             timeMs={timeMs}
             selectedId={selectedId}
@@ -257,14 +294,24 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
               <>
                 <Readout
                   label="Storm now"
-                  value={hazard?.storm ? String(Math.round(hazard.storm.vmax_kt)) : "—"}
+                  value={hazard?.storm ? String(Math.round(hazard.storm.vmax_kt * whatIf.wind)) : "—"}
                   unit="kt"
                 />
                 <Readout label="Backtest AUC" value={scenario.skill.auc?.toFixed(2) ?? "—"} />
-                <Readout label="Surge crest" value={scenario.surge.peak_m.toFixed(1)} unit="m" />
+                <Readout
+                  label="Surge crest"
+                  value={(scenario.surge.peak_m * whatIf.wind ** 2 + whatIf.tide_m).toFixed(1)}
+                  unit="m"
+                />
               </>
             )}
             <Readout label="≥50% outage" value={compactNumber(atRisk)} unit="assets" />
+          </div>
+        )}
+
+        {scenario && mode.kind === "best-track" && (
+          <div className="lg:pointer-events-auto">
+            <WhatIfCard value={whatIf} onChange={setWhatIf} counts={whatIfCounts} />
           </div>
         )}
       </header>
@@ -347,9 +394,10 @@ export function Console({ scenarios, mapsApiKey }: ConsoleProps) {
               role="tab"
               aria-selected={tab === name}
               onClick={() => setTab(name)}
-              className="segment flex-1 !px-1 !py-2 !tracking-[0.08em]"
+              className="segment flex flex-1 flex-col items-center !px-1 !py-1.5 !tracking-[0.08em]"
             >
               {name}
+              <span className="text-[10px] tracking-normal normal-case opacity-70">{TAB_TOPICS[name]}</span>
             </button>
           ))}
         </div>

@@ -52,7 +52,7 @@ interface BriefInput {
 const HOUR_MS = 3_600_000;
 const LIKELY = 0.5;
 const LANDFALL_WINDOW_H = 1;
-const FLOOD_M = 0.3; // ankle-deep: enough to stop vehicles and wet equipment
+export const FLOOD_M = 0.3; // ankle-deep: enough to stop vehicles and wet equipment
 const EXTREME_RAIN_MM = 204.5; // IMD's "extremely heavy" threshold
 const PEOPLE_SITES = ["cyclone_shelter", "school", "hospital", "health_centre", "clinic"];
 /**
