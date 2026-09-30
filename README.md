@@ -54,6 +54,7 @@ flowchart LR
 |---|---|
 | **Predict** | The track (IBTrACS best track, or each ECMWF ensemble forecast *as issued*) drives a Holland (1980) parametric wind field at every site, densified to 15-minute steps, R-CLIPER storm rain, a storm-surge model along the coast, and the same hazard along every arterial road |
 | **Prioritise** | Sites are ranked by calibrated outage probability × criticality (hospitals and shelters 5, substations 4, …, schools 2). Every rank carries plain-language reasons |
+| **What-if** | Sliders stress-test a replay: storm intensity ±30 %, a high tide up to 2 m and rainfall from half to double. The trained outage model re-runs at the scaled winds, surge grows with the wind squared plus the tide, and every site is re-ranked, so the map, list, readouts and Brief move together. Forecast replays stay as issued |
 | **Prepare** | Gemini drafts officer actions and a public CAP 1.2 advisory in English, Hindi and the region's language. Nothing is issued until an officer approves it. An approved advisory goes straight onto a public CAP feed, and every decision is audited |
 | **Prove** | NASA VIIRS night-light loss is measured around every lit substation after landfall, and Gemini reads the before/after satellite images. Rain is scored against NASA GPM and surge against IMD. Skill and failures are published per storm |
 
@@ -304,7 +305,7 @@ On the Odisha coast the 3,325 sites are 765 official OSDMA cyclone shelters plus
 
 - **Strict typing:** Pyright in strict mode on both Python services; TypeScript `strict` in the console.
 - **Lint and format:** ruff (lint + format) for Python; ESLint and Prettier for the console.
-- **Coverage:** 100 % line coverage on the geo service, the archiver and the console's shared logic (`src/lib`: brief, alerts, advisory and CAP builder, media, formatting), enforced by `pytest --cov-fail-under=90` and Vitest 90 % line and branch thresholds.
+- **Coverage:** 100 % line coverage on the geo service, the archiver and the console's shared logic (`src/lib`: brief, alerts, advisory and CAP builder, media, what-if, formatting), enforced by `pytest --cov-fail-under=90` and Vitest 90 % line and branch thresholds.
 - **CI:** one GitHub Actions workflow per component ([web](.github/workflows/web.yml), [geo](.github/workflows/geo.yml), [archiver](.github/workflows/archiver.yml)): lint, format, type check, tests, then a container build or production build.
 - **Security and cost:** keyless auth via Workload Identity Federation, least-privilege service accounts, approval signing, and a budget alarm on the Google Cloud project.
 - **Deploy:** idempotent `gcloud` scripts in [`infra`](infra).
