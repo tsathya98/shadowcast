@@ -74,8 +74,13 @@ export interface AdvisorySummary {
   /** "best-track" or the forecast key the officer was replaying. */
   replay: string;
   headline: string;
+  /** Districts the advisory covers. */
+  areas: string[];
   decidedAt: string;
 }
+
+/** Audit-log ids are the agent's tool-call ids; anything else in a URL is rejected before Firestore is asked. */
+export const ADVISORY_ID = /^[\w-]{1,100}$/;
 
 export interface CapEnvelope {
   identifier: string;
@@ -88,6 +93,8 @@ const XML_ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&
 
 const escapeXml = (text: string) => text.replace(/[&<>"']/g, (char) => XML_ESCAPES[char]);
 
+const element = (tag: string, value: string) => `<${tag}>${escapeXml(value)}</${tag}>`;
+
 /** CAP 1.2 forbids the "Z" designator: render any ISO time as UTC with an explicit +00:00 offset, to the second. */
 export function capTime(iso: string): string {
   return new Date(iso).toISOString().replace(/\.\d{3}Z$/, "+00:00");
@@ -98,7 +105,6 @@ export function capTime(iso: string): string {
  * ShadowCast drafts for the authorities (IMD, OSDMA) and never issues real warnings.
  */
 export function toCapXml(advisory: Advisory, envelope: CapEnvelope): string {
-  const element = (tag: string, value: string) => `<${tag}>${escapeXml(value)}</${tag}>`;
   const infos = advisory.infos.map((info) =>
     [
       "<info>",
@@ -131,5 +137,39 @@ export function toCapXml(advisory: Advisory, envelope: CapEnvelope): string {
     element("note", envelope.note),
     ...infos,
     "</alert>",
+  ].join("\n");
+}
+
+/**
+ * Render issued advisories as an Atom feed of CAP alerts: the form in which an alerting authority publishes its
+ * warnings for aggregators (NDMA SACHET, Google Public Alerts, WMO Alert Hub) to poll. Approving an advisory is
+ * therefore enough to dispatch it: the next poll picks it up, with no further human step.
+ *
+ * @param issued Issued advisories, newest first.
+ * @param origin Absolute origin of the site, e.g. "https://shadowcast-two.vercel.app", for the entry links.
+ * @returns Atom 1.0 XML; each entry links to its CAP 1.2 message at /api/cap/<id>.
+ */
+export function toCapFeed(issued: AdvisorySummary[], origin: string): string {
+  const entries = issued.map((advisory) =>
+    [
+      "<entry>",
+      element("id", `${origin}/api/cap/${advisory.id}`),
+      element("title", advisory.headline),
+      element("updated", capTime(advisory.decidedAt)),
+      element("summary", `Exercise. Areas: ${advisory.areas.join(", ")}`),
+      `<link rel="alternate" type="application/cap+xml" href="${escapeXml(`${origin}/api/cap/${advisory.id}`)}"/>`,
+      "</entry>",
+    ].join(""),
+  );
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<feed xmlns="http://www.w3.org/2005/Atom">',
+    element("id", `${origin}/api/cap`),
+    element("title", "ShadowCast CAP alerts (exercise)"),
+    element("updated", capTime(issued[0]?.decidedAt ?? new Date(0).toISOString())),
+    `<author>${element("name", "ShadowCast (exercise)")}</author>`,
+    `<link rel="self" href="${escapeXml(`${origin}/api/cap`)}"/>`,
+    ...entries,
+    "</feed>",
   ].join("\n");
 }

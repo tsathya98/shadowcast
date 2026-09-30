@@ -176,7 +176,8 @@ export function createAgent(scenario: ScenarioDetail, context: AgentContext) {
       issueAdvisory: tool({
         description:
           "Submit a drafted advisory (officer actions plus the public CAP 1.2 message per language) for the officer's approval. " +
-          "On approval it is issued as a CAP Exercise message and written to the audit log.",
+          "On approval it is issued as a CAP Exercise message, published on the public CAP feed (/api/cap) that alert " +
+          "aggregators poll, and written to the audit log.",
         inputSchema: advisorySchema,
         execute: async (advisory, { toolCallId }) => {
           const sent = new Date().toISOString();
@@ -194,7 +195,7 @@ export function createAgent(scenario: ScenarioDetail, context: AgentContext) {
             reason: null,
             decidedAt: sent,
           });
-          return { advisoryId: toolCallId, sent, capXml };
+          return { advisoryId: toolCallId, sent };
         },
       }),
     },

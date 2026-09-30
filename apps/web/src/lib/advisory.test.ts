@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type Advisory, advisorySchema, capTime, toCapXml } from "./advisory";
+import { type Advisory, advisorySchema, capTime, toCapFeed, toCapXml } from "./advisory";
 
 const advisory: Advisory = {
   event: "Extremely Severe Cyclonic Storm Fani",
@@ -73,5 +73,46 @@ describe("advisorySchema", () => {
     ["a time without an offset", { onset: "2019-05-02T11:15:00" }],
   ])("rejects %s", (_, override) => {
     expect(advisorySchema.safeParse({ ...advisory, ...override }).success).toBe(false);
+  });
+});
+
+describe("toCapFeed", () => {
+  const origin = "https://shadowcast.example";
+
+  it.each([
+    [
+      [
+        {
+          id: "call_2",
+          status: "issued" as const,
+          replay: "best-track",
+          headline: "Move <now>",
+          areas: ["Puri", "Khordha"],
+          decidedAt: "2026-09-30T10:00:00.500Z",
+        },
+        {
+          id: "call_1",
+          status: "issued" as const,
+          replay: "best-track",
+          headline: "Prepare",
+          areas: ["Ganjam"],
+          decidedAt: "2026-09-29T08:00:00Z",
+        },
+      ],
+      "2026-09-30T10:00:00+00:00",
+      2,
+    ],
+    [[], "1970-01-01T00:00:00+00:00", 0],
+  ])("lists issued advisories as Atom entries linking to their CAP messages", (issued, updated, count) => {
+    const feed = toCapFeed(issued, origin);
+    expect(feed).toContain('<feed xmlns="http://www.w3.org/2005/Atom">');
+    expect(feed).toContain(`<link rel="self" href="${origin}/api/cap"/>`);
+    expect(feed).toContain(`<updated>${updated}</updated>`);
+    expect(feed.match(/<entry>/g) ?? []).toHaveLength(count);
+    if (count) {
+      expect(feed).toContain(`<link rel="alternate" type="application/cap+xml" href="${origin}/api/cap/call_2"/>`);
+      expect(feed).toContain("<title>Move &lt;now&gt;</title>");
+      expect(feed).toContain("<summary>Exercise. Areas: Puri, Khordha</summary>");
+    }
   });
 });

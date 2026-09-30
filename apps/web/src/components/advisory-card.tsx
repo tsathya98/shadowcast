@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Download, X } from "lucide-react";
+import { Check, Rss, X } from "lucide-react";
 import { useState } from "react";
 
 import { type Advisory, type Language, LANGUAGES } from "@/lib/advisory";
@@ -9,7 +9,6 @@ import { utcAndIst } from "@/lib/format";
 export interface IssuedAdvisory {
   advisoryId: string;
   sent: string;
-  capXml: string;
 }
 
 type Decision =
@@ -126,13 +125,25 @@ export function AdvisoryCard({ advisory, decision, onSelectAsset }: AdvisoryCard
         )}
         {decision.state === "issued" && (
           <div className="flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
-            <span>Approved and issued {utcAndIst(decision.issued.sent)} · logged in the audit trail</span>
+            <span>
+              Approved {utcAndIst(decision.issued.sent)} · published on the{" "}
+              <a
+                href="/api/cap"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[var(--text-primary)] hover:underline"
+              >
+                CAP feed
+              </a>{" "}
+              · logged in the audit trail
+            </span>
             <a
-              href={`data:application/xml;charset=utf-8,${encodeURIComponent(decision.issued.capXml)}`}
-              download={`${decision.issued.advisoryId}.cap.xml`}
+              href={`/api/cap/${decision.issued.advisoryId}`}
+              target="_blank"
+              rel="noreferrer"
               className="flex shrink-0 items-center gap-1 text-[var(--text-primary)] hover:underline"
             >
-              <Download className="size-3.5" /> CAP XML
+              <Rss className="size-3.5" /> CAP XML
             </a>
           </div>
         )}

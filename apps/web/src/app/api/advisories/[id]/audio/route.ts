@@ -1,12 +1,12 @@
 import { generateSpeech } from "ai";
 import type { NextRequest } from "next/server";
 
+import { ADVISORY_ID } from "@/lib/advisory";
 import { getAdvisory, vertex } from "@/server/google";
 
 export const maxDuration = 60;
 
 const TTS_MODEL = "gemini-2.5-flash-tts";
-const ADVISORY_ID = /^[\w-]{1,100}$/;
 
 /**
  * Speak one language of an issued advisory with Gemini-TTS (Cloud Text-to-Speech has no Odia voice). Only audited,

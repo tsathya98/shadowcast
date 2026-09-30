@@ -106,11 +106,17 @@ export function cachedReading<T extends object>(
 const SCAN_LIMIT = 100;
 
 /**
- * The latest decisions for one scenario, newest first. Filters on the scenario alone (served by Firestore's automatic
- * single-field index) and sorts the small result here, so no composite index is needed.
+ * The latest decisions, newest first, for one scenario or (scenarioId null) across all of them. The scenario query
+ * filters on one field and the global one orders on one field, so Firestore's automatic single-field indexes serve
+ * both and no composite index is needed; the small result is sorted here.
+ *
+ * @param scenarioId Scenario to list, or null for every scenario (the public CAP feed).
+ * @param limit Most decisions to return.
+ * @returns Decision summaries, newest first.
  */
-export async function listAdvisories(scenarioId: string, limit: number): Promise<AdvisorySummary[]> {
-  const snapshot = await advisories.where("scenarioId", "==", scenarioId).limit(SCAN_LIMIT).get();
+export async function listAdvisories(scenarioId: string | null, limit: number): Promise<AdvisorySummary[]> {
+  const query = scenarioId ? advisories.where("scenarioId", "==", scenarioId) : advisories.orderBy("decidedAt", "desc");
+  const snapshot = await query.limit(SCAN_LIMIT).get();
   return snapshot.docs
     .map((doc) => {
       const record = doc.data() as AdvisoryRecord;
@@ -120,6 +126,7 @@ export async function listAdvisories(scenarioId: string, limit: number): Promise
         status: record.status,
         replay: record.replay,
         headline: info.headline,
+        areas: record.advisory.areas,
         decidedAt: record.decidedAt,
       };
     })
