@@ -2,9 +2,10 @@
 
 export const GEO_API_URL = process.env.GEO_API_URL ?? "https://shadowcast-geo-489356738785.asia-south1.run.app";
 
-const TIMEOUT_MS = 10_000;
+// Long enough to ride out a Cloud Run cold start (about 10 to 15 s), which the warm-up ping makes rare.
+const TIMEOUT_MS = 30_000;
 
-/** GET a geo API path, raising with the status and server message on non-2xx responses or after 10 s. */
+/** GET a geo API path, raising with the status and server message on non-2xx responses or after 30 s. */
 export async function geoResponse(path: string): Promise<Response> {
   const response = await fetch(`${GEO_API_URL}${path}`, { cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (!response.ok) throw new Error(`geo API ${response.status} for ${path}: ${await response.text()}`);
